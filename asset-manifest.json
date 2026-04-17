@@ -1,20 +1,20 @@
 {
   "files": {
     "main.css": "/fleet-madacan/static/css/main.f92d49bc.css",
-    "main.js": "/fleet-madacan/static/js/main.7e7dc8bf.js",
+    "main.js": "/fleet-madacan/static/js/main.7a4b84d8.js",
     "static/js/239.c38cff2e.chunk.js": "/fleet-madacan/static/js/239.c38cff2e.chunk.js",
     "static/js/977.694f19d8.chunk.js": "/fleet-madacan/static/js/977.694f19d8.chunk.js",
     "static/js/455.d76b97e1.chunk.js": "/fleet-madacan/static/js/455.d76b97e1.chunk.js",
     "static/media/logo.png": "/fleet-madacan/static/media/logo.115dad209090d4a29152.png",
     "index.html": "/fleet-madacan/index.html",
     "main.f92d49bc.css.map": "/fleet-madacan/static/css/main.f92d49bc.css.map",
-    "main.7e7dc8bf.js.map": "/fleet-madacan/static/js/main.7e7dc8bf.js.map",
+    "main.7a4b84d8.js.map": "/fleet-madacan/static/js/main.7a4b84d8.js.map",
     "239.c38cff2e.chunk.js.map": "/fleet-madacan/static/js/239.c38cff2e.chunk.js.map",
     "977.694f19d8.chunk.js.map": "/fleet-madacan/static/js/977.694f19d8.chunk.js.map",
     "455.d76b97e1.chunk.js.map": "/fleet-madacan/static/js/455.d76b97e1.chunk.js.map"
   },
   "entrypoints": [
     "static/css/main.f92d49bc.css",
-    "static/js/main.7e7dc8bf.js"
+    "static/js/main.7a4b84d8.js"
   ]
 }
