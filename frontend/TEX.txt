@@ -1,0 +1,11 @@
+config add-authtoken 2wimerXEI2SSTmA90iulIZzwbvv_4fG6AHmTM9RkWpHuiU21Y
+
+ngrok http http://localhost:8080
+
+choco install ngrok
+
+ngrok config add-authtoken YOUR_ACTUAL_TOKEN_HERE
+
+RUN SEREVER: ngrok http 3000
+
+Path to start this in front end
