@@ -10,6 +10,19 @@ import {
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { onAuthStateChanged } from 'firebase/auth';
 import { Timestamp } from 'firebase/firestore';
+function getUploadFolder(role) {
+  switch (role) {
+    case "Admin":
+      return "updated-proformas";
+    case "Verificator":
+      return "task-images";
+    case "SCM":
+      return "purchase-requests";
+    default:
+      return "misc";
+  }
+}
+
 
 export default function VehiclePage() {
   const { vehicleId } = useParams();
@@ -180,46 +193,64 @@ else {
     }
   };
   
+function getUploadFolder(role) {
+  switch (role) {
+    case "Admin":
+      return "updated-proformas";
+    case "Verificator":
+      return "task-images";
+    case "SCM":
+      return "purchase-requests";
+    default:
+      return "misc";
+  }
+}
+
 const handleCreateJob = async () => {
   if (!form.description || !form.mechanic) {
-    alert('Please fill in Description and Mechanic');
+    alert("Please fill in Description and Mechanic");
     return;
   }
 
-   // ✅ If transfer is checked, ensure a vehicle is selected
   if (form.transfer && !fromVehicleId) {
     alert("Please select a vehicle to demande parts");
     return;
   }
 
-  try {
-    let purchaseFileUrl = '', purchaseFileName = '';
+  // ✅ Check authentication before upload
+  if (!auth.currentUser) {
+    alert("You must be signed in to upload files.");
+    return;
+  }
 
-    // ✅ Upload Purchase Request file if it exists
+  try {
+    let purchaseFileUrl = "";
+    let purchaseFileName = "";
+
     if (form.purchaseFile) {
+      console.log("▶ Uploading file:", form.purchaseFile.name);
       try {
-        const fileRef = ref(
-          storage,
-          `purchase-requests/${Date.now()}_${form.purchaseFile.name}`
-        );
-        await uploadBytes(fileRef, form.purchaseFile);
+        const fileRef = ref(storage, `purchase-requests/${Date.now()}_${form.purchaseFile.name}`);
+        const snapshot = await uploadBytes(fileRef, form.purchaseFile);
+        console.log("✅ Upload snapshot:", snapshot);
+
         purchaseFileUrl = await getDownloadURL(fileRef);
         purchaseFileName = form.purchaseFile.name;
+        console.log("✅ File uploaded, URL:", purchaseFileUrl);
       } catch (fileErr) {
-        console.warn('⚠️ Failed to upload Purchase Request file:', fileErr);
-        // continue without blocking job creation
+        console.error("❌ Upload failed:", fileErr);
+        alert("Upload failed. See console for details.");
       }
     }
 
-    // ✅ Main job data
     const jobData = {
       mechanic: form.mechanic,
       description: form.description,
-      status: form.status,
-      priority: form.priority,
-      requester: auth.currentUser?.email || 'Unknown',
-      adminApprovalStatus: 'Waiting',
-      finalApprovalStatus: 'Waiting',
+      status: form.status || "In Progress",
+      priority: form.priority || "Medium",
+      requester: auth.currentUser?.email || "Unknown",
+      adminApprovalStatus: "Waiting",
+      finalApprovalStatus: "Waiting",
       urgentApproval: false,
       preApprovalLocked: false,
       finalApprovalLocked: false,
@@ -228,87 +259,66 @@ const handleCreateJob = async () => {
       createdAt: form.createdAt ? new Date(form.createdAt) : new Date(),
       purchaseFileUrl,
       purchaseFileName,
-      transfer: form.transfer || false
+      transfer: form.transfer || false,
     };
 
-    // ✅ Create the main job
-    const jobRef = await addDoc(
-      collection(db, 'vehicles', vehicleId, 'jobs'),
-      jobData
-    );
-    const jobId = jobRef.id;
+    const jobRef = await addDoc(collection(db, "vehicles", vehicleId, "jobs"), jobData);
+    console.log("✅ Job created:", jobRef.id);
 
-    // ✅ If transfer, create mirrored job in fromVehicleId
-    if (form.transfer && fromVehicleId) {
-      const requestingVehicleSnap = await getDoc(doc(db, 'vehicles', vehicleId));
-      const requestingVehicle = requestingVehicleSnap.exists()
-        ? requestingVehicleSnap.data()
-        : {};
-
-      const requestingVehicleLabel = `${requestingVehicle.type || 'Vehicle'} - ${
-        requestingVehicle.plate || vehicleId
-      }`;
-
-      const mirroredJobRef = await addDoc(
-        collection(db, 'vehicles', fromVehicleId, 'jobs'),
-        {
-          description: `Part transferred to vehicle ${requestingVehicleLabel}`,
-          mechanic: jobData.mechanic,
-          priority: jobData.priority,
-          status: jobData.status,
-          purchaseRequestNumber: jobData.purchaseRequestNumber || '',
-          purchaseFileUrl: jobData.purchaseFileUrl || '',
-          purchaseFileName: jobData.purchaseFileName || '',
-          createdAt: new Date(),
-          transfer: true,
-          transferMirror: true,
-          toVehicleId: vehicleId,
-          mirrorOfJobId: jobId
-        }
-      );
-
-      await updateDoc(jobRef, { linkedJobId: mirroredJobRef.id });
-      console.log('✅ Mirrored job created and linked:', mirroredJobRef.id);
-    }
-
-    // ✅ Reset form
+    alert("✅ Job created successfully.");
     setForm({
-      mechanic: '',
-      description: '',
-      status: 'In Progress',
-      priority: 'Medium',
-      purchaseRequestNumber: '',
+      mechanic: "",
+      description: "",
+      status: "In Progress",
+      priority: "Medium",
+      purchaseRequestNumber: "",
       purchaseFile: null,
-      mileage: '',
-      createdAt: '',
-      transfer: false
+      mileage: "",
+      createdAt: "",
+      transfer: false,
     });
-
   } catch (err) {
-    console.error('❌ Error creating job:', err);
-    alert('Error creating job. See console for details.');
+    console.error("❌ Error creating job:", err);
+    alert("Error creating job. See console for details.");
   }
 };
 
 
 
-  const handleUpdateProforma = async (jobId, file) => {
+function getUploadFolder(role) {
+  switch (role) {
+    case "Admin":
+      return "updated-proformas";
+    case "Verificator":
+      return "task-images";
+    case "SCM":
+      return "purchase-requests";
+    default:
+      return "misc";
+  }
+}
+
+const handleUpdateProforma = async (jobId, file) => {
   if (!file) {
     alert("Please select a file to upload.");
     return;
   }
 
   try {
+    // Decide folder based on role
+    const folderName = getUploadFolder(role);
+
     // Upload to Firebase Storage
-    const fileRef = ref(storage, `updated-proformas/${Date.now()}_${file.name}`);
+    const fileRef = ref(storage, `${folderName}/${Date.now()}_${file.name}`);
     await uploadBytes(fileRef, file);
     const downloadURL = await getDownloadURL(fileRef);
 
     // Update ONLY the updatedProforma fields in Firestore
-    const jobRef = doc(db, 'vehicles', vehicleId, 'jobs', jobId);
+    const jobRef = doc(db, "vehicles", vehicleId, "jobs", jobId);
     await updateDoc(jobRef, {
       updatedProformaUrl: downloadURL,
-      updatedProformaFileName: file.name
+      updatedProformaFileName: file.name,
+      updatedProformaFolder: folderName // optional: track folder used
     });
 
     alert("✅ Updated Proforma uploaded successfully.");
@@ -320,10 +330,22 @@ const handleCreateJob = async () => {
   }
 };
 
+function getUploadFolder(role) {
+  switch (role) {
+    case "Admin":
+      return "updated-proformas";
+    case "Verificator":
+      return "task-images";
+    case "SCM":
+      return "purchase-requests";
+    default:
+      return "misc";
+  }
+}
 
-  const handleSaveEdit = async (jobId) => {
+const handleSaveEdit = async (jobId) => {
   try {
-    const jobRef = doc(db, 'vehicles', vehicleId, 'jobs', jobId);
+    const jobRef = doc(db, "vehicles", vehicleId, "jobs", jobId);
     const jobSnap = await getDoc(jobRef);
 
     if (!jobSnap.exists()) {
@@ -331,32 +353,36 @@ const handleCreateJob = async () => {
     }
 
     const updatedData = {
-  mechanic: editForm.mechanic || '',
-  description: editForm.description || '',
-  priority: editForm.priority || 'Medium',
-  status: editForm.status || 'In Progress',
-  mileage: editForm.mileage || '',
-  purchaseRequestNumber: editForm.purchaseRequestNumber || '',
-  createdAt: editForm.createdAt ? new Date(editForm.createdAt) : new Date(),
-  transfer: editForm.transfer || false   // ✅ include transfer when saving
-};
-
+      mechanic: editForm.mechanic || "",
+      description: editForm.description || "",
+      priority: editForm.priority || "Medium",
+      status: editForm.status || "In Progress",
+      mileage: editForm.mileage || "",
+      purchaseRequestNumber: editForm.purchaseRequestNumber || "",
+      createdAt: editForm.createdAt ? new Date(editForm.createdAt) : new Date(),
+      transfer: editForm.transfer || false
+    };
 
     if (editForm.purchaseFile) {
-  const fileRef = ref(storage, `purchase-requests/${Date.now()}_${editForm.purchaseFile.name}`);
-  await uploadBytes(fileRef, editForm.purchaseFile);
-  const downloadURL = await getDownloadURL(fileRef);
-  updatedData.purchaseFileUrl = downloadURL;
-  updatedData.purchaseFileName = editForm.purchaseFile.name;
-}
+      // Decide folder based on role
+      const folderName = getUploadFolder(role);
 
+      // Upload to Firebase Storage
+      const fileRef = ref(storage, `${folderName}/${Date.now()}_${editForm.purchaseFile.name}`);
+      await uploadBytes(fileRef, editForm.purchaseFile);
+      const downloadURL = await getDownloadURL(fileRef);
 
+      // Add file metadata to updatedData
+      updatedData.purchaseFileUrl = downloadURL;
+      updatedData.purchaseFileName = editForm.purchaseFile.name;
+      updatedData.purchaseFileFolder = folderName; // optional: track folder used
+    }
 
     await updateDoc(jobRef, updatedData);
     setEditId(null);
   } catch (err) {
-    console.error('❌ Error in handleSaveEdit:', err.message, err);
-    alert('Failed to save job edits.');
+    console.error("❌ Error in handleSaveEdit:", err.message, err);
+    alert("Failed to save job edits.");
   }
 };
 
