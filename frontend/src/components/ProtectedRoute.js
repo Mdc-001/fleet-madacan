@@ -6,14 +6,22 @@ import { doc, getDoc } from "firebase/firestore";
 const ProtectedRoute = ({ children, allowedRoles }) => {
   const [role, setRole] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState(null);
 
   useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged(async (user) => {
-      if (user) {
-        const snap = await getDoc(doc(db, "users", user.uid));
-        const firestoreRole = snap.data()?.role?.toLowerCase();
-        setRole(firestoreRole || null);
+    const unsubscribe = auth.onAuthStateChanged(async (currentUser) => {
+      if (currentUser) {
+        setUser(currentUser);
+        try {
+          const snap = await getDoc(doc(db, "users", currentUser.uid));
+          const firestoreRole = snap.data()?.role?.toLowerCase();
+          setRole(firestoreRole || null);
+        } catch (err) {
+          console.error("Error fetching user role:", err);
+          setRole(null);
+        }
       } else {
+        setUser(null);
         setRole(null);
       }
       setLoading(false);
@@ -22,13 +30,22 @@ const ProtectedRoute = ({ children, allowedRoles }) => {
     return () => unsubscribe();
   }, []);
 
-  if (loading) return <div>Loading...</div>;
+  if (loading) {
+    return <div>Loading...</div>; // ✅ visible while Firebase initializes
+  }
+
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
 
   const normalizedAllowedRoles = allowedRoles.map(r => r.toLowerCase());
 
-  if (!role) return <Navigate to="/login" />;
+  if (!role) {
+    return <Navigate to="/login" replace />;
+  }
+
   if (!normalizedAllowedRoles.includes(role)) {
-    return <Navigate to="/unauthorized" />;
+    return <div>Access denied</div>; // ✅ clear message instead of blank page
   }
 
   return children;

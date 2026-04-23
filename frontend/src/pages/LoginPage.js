@@ -1,11 +1,9 @@
-// src/pages/LoginPage.js
 import './LoginPage.css';
 import React, { useState } from 'react';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 import { useNavigate } from 'react-router-dom';
-// Import logo (adjust path if placed differently)
 import logo from '../assets/logo.png';
 
 function LoginPage() {
@@ -26,26 +24,36 @@ function LoginPage() {
       const userSnap = await getDoc(userRef);
 
       if (!userSnap.exists()) {
-        throw new Error('User data not found.');
+        setError('User data not found.');
+        return;
       }
 
-      const userData = userSnap.data();
-      const role = userData.role;
+      const role = userSnap.data().role;
 
-      if (role === 'Admin') navigate('/admin');
-else if (role === 'User') navigate('/user');
-else if (role === 'Approval') navigate('/approval');
-else if (role === 'verificator') navigate('/verificator-dashboard');
-else if (role === 'storeroom') navigate('/warehouse-dashboard');
-else if (role === 'Scm') {
-  navigate('/scm'); // ✅ your dedicated dashboard
-} 
-else throw new Error('Unknown role: ' + role);
-
-
-
+      switch (role) {
+        case 'Admin':
+          navigate('/admin');
+          break;
+        case 'User':
+          navigate('/user');
+          break;
+        case 'Approval':
+          navigate('/approval');
+          break;
+        case 'verificator':
+          navigate('/verificator-dashboard');
+          break;
+        case 'storeroom':
+          navigate('/warehouse-dashboard');
+          break;
+        case 'Scm':
+          navigate('/scm');
+          break;
+        default:
+          setError(`Unknown role: ${role}`);
+      }
     } catch (err) {
-      console.error(err);
+      console.error("Login error:", err);
       setError(err.message || 'Login failed');
     }
   };
