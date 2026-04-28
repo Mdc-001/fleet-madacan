@@ -161,6 +161,9 @@ A new job has been created for vehicle: ${vehicleInfo}
 📅 Start Date: ${startDate}
 📎 Purchase Request File: ${prFileLink}
 
+Access the Fleet App:
+https://mdc-001.github.io/fleet-madacan/
+
 Thanks,
 Fleet Management System`
   };

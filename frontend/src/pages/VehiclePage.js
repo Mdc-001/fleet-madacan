@@ -95,6 +95,7 @@ useEffect(() => {
     const tasks = taskSnap.docs.map(t => t.data());
     const allTasksDone = tasks.length > 0 && tasks.every(t => t.completed);
 
+
     let computedStatus;
 const hasPR = !!data.purchaseFileUrl;
 
@@ -139,10 +140,12 @@ else {
   status: computedStatus,
   approvalStatus,
   approvalNote: data.approvalNote || null,
-  verificationNote: data.verificationNote || null,     // ✅ add this
-  verifiedBy: data.verifiedBy || null,                 // ✅ add this
-  verifiedAt: data.verifiedAt || null                  // ✅ add this
+  verificationNote: data.verificationNote || null,
+  verifiedBy: data.verifiedBy || null,
+  verifiedAt: data.verifiedAt || null,
+  closedByAdmin: data.closedByAdmin || null   // ✅ include this
 };
+
 
 
   })
@@ -176,8 +179,6 @@ else {
     transfer: !!job.transfer, // ✅ fixed (no inversion)
   });
 };
-
-
 
   
   const markJobAsCompletedManually = async (jobId) => {
@@ -386,6 +387,50 @@ const handleSaveEdit = async (jobId) => {
   }
 };
 
+const confirmAndMarkComplete = (jobId) => {
+  if (window.confirm("Are you sure you want to mark this job as Completed?")) {
+    markJobAsComplete(jobId);
+  }
+};
+
+const confirmAndMarkRegular = (jobId) => {
+  if (window.confirm("Are you sure you want to mark this job as Completed as Regular?")) {
+    markJobAsRegular(jobId);
+  }
+};
+
+
+const markJobAsComplete = async (jobId) => {
+  try {
+    await updateDoc(doc(db, 'vehicles', vehicleId, 'jobs', jobId), {
+      status: 'Completed',
+      adminApprovalStatus: 'Approved',
+      finalApprovalStatus: 'Approved',
+      completedAt: Timestamp.now(),
+      closedByAdmin: 'Completed' // custom flag
+    });
+    console.log(`✅ Job ${jobId} marked as Completed by Admin`);
+  } catch (error) {
+    console.error('❌ Error marking job as Completed:', error);
+  }
+};
+
+const markJobAsRegular = async (jobId) => {
+  try {
+    await updateDoc(doc(db, 'vehicles', vehicleId, 'jobs', jobId), {
+      status: 'Completed', // ✅ also mark as completed
+      adminApprovalStatus: 'Approved',
+      finalApprovalStatus: 'Approved',
+      completedAt: Timestamp.now(),
+      closedByAdmin: 'Regular' // custom flag
+    });
+    console.log(`✅ Job ${jobId} marked as Completed as Regular`);
+  } catch (error) {
+    console.error('❌ Error marking job as Regular:', error);
+  }
+};
+
+
 
 const handleSaveApprovalNote = async (jobId) => {
   const note = noteInputs[jobId]?.trim();
@@ -477,6 +522,10 @@ const handleDeletePR = async (jobId, fileUrl) => {
     alert("An unexpected error occurred while deleting the job.");
   }
 };
+
+
+
+
 
   const updateApprovalField = async (jobId, field, value) => {
   const updatePayload = { [field]: value };
@@ -816,13 +865,27 @@ const handleDeletePR = async (jobId, fileUrl) => {
 
 .................................................................................
   {/* Add your approval section + buttons here */}
-  <div style={{ marginTop: '10px' }}>
-    {/* For example: */}
-    <strong>Pre-approval:</strong> {job.adminApprovalStatus}<br />
-    <strong>Final Approval:</strong> {job.finalApprovalStatus}<br />
-    {/* Add Edit/Delete/Open buttons as you already have */}
-  </div>
+ <div style={{ marginTop: '10px' }}>
+  <strong>Pre-approval:</strong> {job.adminApprovalStatus}<br />
+  <strong>Final Approval:</strong> {job.finalApprovalStatus}<br />
+
+  {job.closedByAdmin === 'Regular' && (
+    <span className="badge badge-regular">
+      Job completed as Regular on {job.completedAt?.toDate().toLocaleDateString()}
+    </span>
+  )}
+
+  {job.closedByAdmin === 'Completed' && (
+    <span className="badge badge-complete">
+      Marked Completed by Pre-approval on {job.completedAt?.toDate().toLocaleDateString()}
+    </span>
+  )}
 </div>
+
+
+
+</div>
+
 
 
   {/* :::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::: */}
@@ -1119,34 +1182,48 @@ const handleDeletePR = async (jobId, fileUrl) => {
 
    {/* Admin unlock dropdown */}
 <div style={{ marginTop: '10px' }}>
-  <label>Edit Approval: </label>
+  <label>Manage Options: </label>
   <select
-    onChange={async (e) => {
-      const action = e.target.value;
-      if (!action) return;
+  onChange={async (e) => {
+    const action = e.target.value;
+    if (!action) return;
 
-      const updates = {};
+    const updates = {};
 
-      if (action === 'unlockPre') {
-        updates.preApprovalLocked = false;
-        updates.finalApprovalStatus = 'Waiting'; // ✅ Reset to Waiting
+    if (action === 'unlockPre') {
+      updates.preApprovalLocked = false;
+      updates.finalApprovalStatus = 'Waiting';
+    }
+
+    if (action === 'unlockFinal') {
+      updates.finalApprovalLocked = false;
+      updates.finalApprovalStatus = 'Waiting';
+      updates.approvedBy = null;
+      updates.approvedAt = null;
+    }
+
+    if (action === 'markComplete') {
+      if (window.confirm("Are you sure you want to mark this job as Completed?")) {
+        updates.status = 'Completed';
+        updates.adminApprovalStatus = 'Approved';
+        updates.finalApprovalStatus = 'Approved';
+        updates.completedAt = Timestamp.now();
+        updates.closedByAdmin = 'Completed';
       }
+    }
 
-      if (action === 'unlockFinal') {
-        updates.finalApprovalLocked = false;
-        updates.finalApprovalStatus = 'Waiting'; // ✅ Reset to Waiting
-        updates.approvedBy = null;
-        updates.approvedAt = null;
+    if (action === 'markRegular') {
+      if (window.confirm("Are you sure you want to mark this job as Completed as Regular?")) {
+        updates.status = 'Completed'; // ✅ also mark as completed
+        updates.adminApprovalStatus = 'Approved';
+        updates.finalApprovalStatus = 'Approved';
+        updates.completedAt = Timestamp.now();
+        updates.closedByAdmin = 'Regular';
       }
+    }
 
-      if (action === 'unlockRegular') {
-        updates.finalApprovalLocked = false;
-        updates.finalApprovalStatus = 'Approved as Regular'; // ✅ Restore Regular Approval
-        updates.approvedBy = null;
-        updates.approvedAt = null;
-      }
-
-      // Update main job
+    // Update main job
+    if (Object.keys(updates).length > 0) {
       await updateDoc(doc(db, 'vehicles', vehicleId, 'jobs', job.id), updates);
 
       // 🔁 Mirror sync
@@ -1154,14 +1231,18 @@ const handleDeletePR = async (jobId, fileUrl) => {
         const mirrorRef = doc(db, 'vehicles', job.fromVehicleId, 'jobs', job.mirrorJobId);
         await updateDoc(mirrorRef, updates);
       }
+    }
 
-      e.target.value = ''; // reset dropdown
-    }}
-  >
-    <option value="">-- Edit Approval --</option>
-    <option value="unlockPre">Unlock Pre-approval</option>
-    <option value="unlockFinal">Unlock Final Approval </option>
-  </select>
+    e.target.value = ''; // reset dropdown
+  }}
+>
+  <option value="">-- Manage Options --</option>
+  <option value="unlockPre">Unlock Pre-approval</option>
+  <option value="unlockFinal">Unlock Final Approval</option>
+  <option value="markComplete">Mark as Complete</option>
+  <option value="markRegular">Mark as Regular</option>
+</select>
+
 </div>
   </>
 )}
@@ -1543,6 +1624,7 @@ const handleDeletePR = async (jobId, fileUrl) => {
 )}
 
 
+
         {role === 'Admin' && editId !== job.id && (
           <>
             <button style={{ marginTop: '10px' }} onClick={() => handleStartEdit(job)}>✏️ Edit</button>
@@ -1561,3 +1643,4 @@ const handleDeletePR = async (jobId, fileUrl) => {
     </div>
   );
 }
+

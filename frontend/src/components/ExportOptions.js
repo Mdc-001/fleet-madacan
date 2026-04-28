@@ -159,6 +159,60 @@ export default function ExportOptions({ vehicles = [], onClose }) {
       onClose();
       return;
     }
+
+    if (exportType === 'jobsWithoutProforma') {
+  let jobsWithoutProforma = [];
+
+  filteredVehicles.forEach(vehicle => {
+    const jobs = Array.isArray(vehicle.jobs) ? vehicle.jobs : [];
+    jobs.forEach(job => {
+      const hasNoProforma = !job.purchaseFile && !job.proformaFile;
+      if (hasNoProforma) {
+        jobsWithoutProforma.push({ ...job, vehiclePlate: vehicle.plate });
+      }
+    });
+  });
+
+  // Apply date filtering if not using all dates
+  if (!useAllDates && (startDate || endDate)) {
+    const start = startDate ? new Date(startDate) : null;
+    const end = endDate ? new Date(endDate) : null;
+
+    jobsWithoutProforma = jobsWithoutProforma.filter(job => {
+      const raw = job.createdAt?.toDate?.() || job.createdAt || null;
+      const created = new Date(raw);
+      if (isNaN(created)) return false;
+      const afterStart = start ? created >= start : true;
+      const beforeEnd = end ? created <= end : true;
+      return afterStart && beforeEnd;
+    });
+  }
+
+  const exportJobs = jobsWithoutProforma.map(job => ({
+    Vehicle: job.vehiclePlate || '',
+    JobID: job.id || '',
+    Description: job.description || '',
+    Status: job.status || '',
+    Mechanic: job.mechanic || '',
+    Mileage: job.mileage || '',
+    Priority: job.priority || '',
+    Requester: job.requester || '',
+    Created: formatDate(job.createdAt),
+    'PR Number': job.purchaseRequestNumber || ''
+  }));
+
+  const worksheet = XLSX.utils.json_to_sheet(exportJobs);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'Jobs Without Proforma');
+  XLSX.writeFile(workbook, 'jobs_without_proforma.xlsx');
+  onClose();
+  return;
+}
+
+
+
+
+
 if (exportType === 'fuelReport') {
   const start = startDate ? new Date(startDate) : null;
   const end = endDate ? new Date(endDate) : null;
@@ -261,6 +315,17 @@ if (exportType === 'fuelReport') {
             />
             Jobs not validated
           </label>
+
+          <label>
+  <input
+    type="radio"
+    value="jobsWithoutProforma"
+    checked={exportType === 'jobsWithoutProforma'}
+    onChange={(e) => setExportType(e.target.value)}
+  />
+  Jobs Without Proforma
+</label>
+
 
           <label>
             <input
