@@ -172,3 +172,177 @@ Fleet Management System`
   console.log("📤 Sending normal job email:", JSON.stringify(mailOptions, null, 2));
   await sendWithRetry(mailOptions);
 });
+
+// ✅ 2. FINAL PRE-APPROVAL EMAIL
+exports.sendPreApprovalNotification = onDocumentUpdated({
+  document: 'vehicles/{vehicleId}/jobs/{jobId}',
+  secrets: [EMAIL_USER, EMAIL_PASS]
+}, async (event) => {
+  const before = event.data.before.data();
+  const after = event.data.after.data();
+  const { vehicleId, jobId } = event.params;
+
+  // Trigger only when adminApprovalStatus flips to Approved
+  if (before.adminApprovalStatus !== 'Approved' && after.adminApprovalStatus === 'Approved') {
+    const jobData = after;
+
+    const vehicleSnap = await admin.firestore().doc(`vehicles/${vehicleId}`).get();
+    const v = vehicleSnap.exists ? vehicleSnap.data() : {};
+    const isTestVehicle = v?.isTest === true;
+
+    const type = v.type || 'Vehicle';
+    const plate = v.plate || 'Unknown Plate';
+    const notes = v.notes ? `(${v.notes})` : '';
+    const vehicleInfo = `${type} - ${plate} ${notes}`.trim();
+
+    const transporter = createTransporter(); // uses mail.madacan.com + applications login
+    const startDate = formatDate(jobData.startDate || jobData.createdAt);
+    const prFileLink = formatPurchaseInfo(jobData.purchaseFileUrl, jobData.purchaseFileName);
+    const approvedBy = jobData.approvedBy || 'N/A';
+    const approvedAt = formatDate(jobData.approvedAt || new Date());
+    const preApprovalMeta = `Approved by: ${approvedBy} on ${approvedAt}`;
+
+    // Helpers
+    const asArray = (x) => (Array.isArray(x) ? x : (x ? [x] : [])).filter(Boolean);
+    const looksLikeEmail = (s) => typeof s === 'string' && s.includes('@');
+
+    let toRecipients = [];
+    let ccRecipients = [];
+
+    // =============================
+    // A) TRANSFER JOB PRE-APPROVAL
+    // =============================
+    if (jobData.transfer) {
+      toRecipients = isTestVehicle
+        ? await getEmailList('defaultTest')
+        : await getEmailList('defaulttransfer');
+
+      const requesterEmail = looksLikeEmail(jobData.requesterEmail || jobData.requester)
+        ? (jobData.requesterEmail || jobData.requester)
+        : null;
+      ccRecipients = asArray(requesterEmail);
+
+      if (toRecipients.length === 0 && ccRecipients.length > 0) {
+        toRecipients = ccRecipients;
+        ccRecipients = [];
+      }
+      if (toRecipients.length === 0) {
+        toRecipients = await getEmailList('defaultAlways');
+      }
+      if (toRecipients.length === 0 && ccRecipients.length === 0) {
+        console.error('❌ No recipients configured for TRANSFER pre-approval. Aborting send.');
+        return;
+      }
+
+      const mailOptions = {
+        from: '"Fleet App" <noreply@madacan.com>', // ✅ fixed sender
+        to: toRecipients,
+        cc: ccRecipients,
+        subject: `🚨 TRANSFER PRE-APPROVED: ${vehicleInfo}`,
+        text: `Hello team,
+
+This TRANSFER job has been PRE-APPROVED for vehicle: ${vehicleInfo}.
+
+🧾 Job ID: ${jobData.jobNumber || jobId}
+👤 Requester: ${jobData.requester}
+👷‍♂️ Mechanic: ${jobData.mechanic}
+📋 Description: ${jobData.description}
+📅 Start Date: ${startDate}
+📎 Purchase Request File: ${prFileLink}
+
+✅ ${preApprovalMeta}
+
+Access the Fleet App:
+https://mdc-001.github.io/fleet-madacan/
+
+Thanks,
+Fleet Management System`
+      };
+
+      try {
+        await transporter.sendMail(mailOptions);
+        console.log('✅ Transfer pre-approval email sent to:', toRecipients, '| CC:', ccRecipients);
+      } catch (error) {
+        console.error('❌ Failed to send transfer pre-approval email:', error);
+        console.error('❌ MailOptions content:', JSON.stringify(mailOptions, null, 2));
+      }
+      return; // skip normal branch
+    }
+
+    // =============================
+    // B) NORMAL PRE-APPROVAL
+    // =============================
+    if (isTestVehicle) {
+      toRecipients = await getEmailList('defaultTest');
+    } else {
+      const pre = v.preApprovalEmail || await getEmailList('defaultPreApproval');
+      const final = v.finalApprovalEmail || await getEmailList('defaultFinalApproval');
+      ccRecipients = [...asArray(pre), ...asArray(final)];
+
+      const verifiers = await getEmailList('defaultVerificator');
+      const area = (v.Area || '').toUpperCase();
+
+      let scmTeam = [];
+      if (area === 'TNR') {
+        scmTeam = [...await getEmailList('scmTNR'), ...await getEmailList('scmFleet')];
+      } else if (area === 'TOAMASINA') {
+        scmTeam = [...await getEmailList('scmTMM'), ...await getEmailList('scmFleet')];
+      } else if (area === 'MORAMANGA') {
+        scmTeam = [...await getEmailList('scmTMM'), ...await getEmailList('scmTNR'), ...await getEmailList('scmFleet')];
+      } else {
+        scmTeam = await getEmailList('scmTMM');
+      }
+
+      toRecipients = [...asArray(verifiers), ...asArray(scmTeam)];
+    }
+
+    if (toRecipients.length === 0 && ccRecipients.length === 0) {
+      toRecipients = await getEmailList('defaultAlways');
+    }
+    if (toRecipients.length === 0 && ccRecipients.length === 0) {
+      const requesterEmail = looksLikeEmail(jobData.requesterEmail || jobData.requester)
+        ? (jobData.requesterEmail || jobData.requester)
+        : null;
+      ccRecipients = asArray(requesterEmail);
+    }
+    if (toRecipients.length === 0 && ccRecipients.length === 0) {
+      console.error('❌ No recipients for NORMAL pre-approval. Aborting send.');
+      return;
+    }
+
+    const mailOptions = {
+      from: '"Fleet App" <noreply@madacan.com>', // ✅ fixed sender
+      to: toRecipients,
+      cc: ccRecipients,
+      subject: `🛡️ FLEET APP: Job Pre-Approved for ${vehicleInfo}`,
+      text: `Hello team,
+
+A job has been PRE-APPROVED for vehicle: ${vehicleInfo}
+
+SCM Team: "Please submit selected proforma when ready by replying to this email to Fleet maintenance"
+
+🧾 Job ID: ${jobData.jobNumber || jobId}
+📋 Description: ${jobData.description}
+👤 Requester: ${jobData.requester}
+👷‍♂️ Mechanic: ${jobData.mechanic}
+📅 Start Date: ${startDate}
+📎 Purchase Request File: ${prFileLink}
+
+✅ ${preApprovalMeta}
+
+Access the Fleet App:
+https://mdc-001.github.io/fleet-madacan/
+
+Thanks,
+Fleet Management System`
+    };
+
+    try {
+      await transporter.sendMail(mailOptions);
+      console.log('✅ Pre-approval email sent to (To):', toRecipients, '| Cc:', ccRecipients);
+    } catch (error) {
+      console.error('❌ Failed to send pre-approval email:', error);
+      console.error('❌ MailOptions content:', JSON.stringify(mailOptions, null, 2));
+    }
+  }
+});
