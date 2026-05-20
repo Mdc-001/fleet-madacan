@@ -173,10 +173,9 @@ Fleet Management System`
   await sendWithRetry(mailOptions);
 });
 
-// ✅ 2. FINAL PRE-APPROVAL EMAIL
+// ✅ Pre-Approval Notification Email
 exports.sendPreApprovalNotification = onDocumentUpdated({
-  document: 'vehicles/{vehicleId}/jobs/{jobId}',
-  secrets: [EMAIL_USER, EMAIL_PASS]
+  document: 'vehicles/{vehicleId}/jobs/{jobId}'
 }, async (event) => {
   const before = event.data.before.data();
   const after = event.data.after.data();
@@ -195,7 +194,6 @@ exports.sendPreApprovalNotification = onDocumentUpdated({
     const notes = v.notes ? `(${v.notes})` : '';
     const vehicleInfo = `${type} - ${plate} ${notes}`.trim();
 
-    const transporter = createTransporter(); // uses mail.madacan.com + applications login
     const startDate = formatDate(jobData.startDate || jobData.createdAt);
     const prFileLink = formatPurchaseInfo(jobData.purchaseFileUrl, jobData.purchaseFileName);
     const approvedBy = jobData.approvedBy || 'N/A';
@@ -235,9 +233,8 @@ exports.sendPreApprovalNotification = onDocumentUpdated({
       }
 
       const mailOptions = {
-        from: '"Fleet App" <noreply@madacan.com>', // ✅ fixed sender
-        to: toRecipients,
-        cc: ccRecipients,
+        to: [...new Set(toRecipients)],
+        cc: [...new Set(ccRecipients)],
         subject: `🚨 TRANSFER PRE-APPROVED: ${vehicleInfo}`,
         text: `Hello team,
 
@@ -259,14 +256,9 @@ Thanks,
 Fleet Management System`
       };
 
-      try {
-        await transporter.sendMail(mailOptions);
-        console.log('✅ Transfer pre-approval email sent to:', toRecipients, '| CC:', ccRecipients);
-      } catch (error) {
-        console.error('❌ Failed to send transfer pre-approval email:', error);
-        console.error('❌ MailOptions content:', JSON.stringify(mailOptions, null, 2));
-      }
-      return; // skip normal branch
+      console.log("📤 Sending transfer pre-approval email:", JSON.stringify(mailOptions, null, 2));
+      await sendWithRetry(mailOptions);
+      return;
     }
 
     // =============================
@@ -311,9 +303,8 @@ Fleet Management System`
     }
 
     const mailOptions = {
-      from: '"Fleet App" <noreply@madacan.com>', // ✅ fixed sender
-      to: toRecipients,
-      cc: ccRecipients,
+      to: [...new Set(toRecipients)],
+      cc: [...new Set(ccRecipients)],
       subject: `🛡️ FLEET APP: Job Pre-Approved for ${vehicleInfo}`,
       text: `Hello team,
 
@@ -337,12 +328,7 @@ Thanks,
 Fleet Management System`
     };
 
-    try {
-      await transporter.sendMail(mailOptions);
-      console.log('✅ Pre-approval email sent to (To):', toRecipients, '| Cc:', ccRecipients);
-    } catch (error) {
-      console.error('❌ Failed to send pre-approval email:', error);
-      console.error('❌ MailOptions content:', JSON.stringify(mailOptions, null, 2));
-    }
+    console.log("📤 Sending normal pre-approval email:", JSON.stringify(mailOptions, null, 2));
+    await sendWithRetry(mailOptions);
   }
 });
