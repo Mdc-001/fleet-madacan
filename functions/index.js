@@ -1,9 +1,10 @@
 const functions = require('firebase-functions');
 const admin = require('firebase-admin');
-const { onDocumentCreated } = require('firebase-functions/v2/firestore');
+const { onDocumentCreated, onDocumentUpdated } = require('firebase-functions/v2/firestore');
 const fetch = require('node-fetch');
 
 admin.initializeApp();
+
 
 // 📦 Reusable: Fetch email list from Firestore by document ID
 const getEmailList = async (docId) => {
