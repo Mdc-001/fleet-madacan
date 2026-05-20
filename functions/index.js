@@ -399,3 +399,152 @@ Fleet Management System`
     await sendWithRetry(mailOptions);
   }
 });
+
+// ✅ Final Approval Notification Email
+exports.sendFinalApprovalNotification = onDocumentUpdated({
+  document: 'vehicles/{vehicleId}/jobs/{jobId}'
+}, async (event) => {
+  const before = event.data.before.data();
+  const after = event.data.after.data();
+  const { vehicleId, jobId } = event.params;
+
+  // Trigger only when finalApprovalStatus flips to Approved
+  if (before.finalApprovalStatus !== 'Approved' && after.finalApprovalStatus === 'Approved') {
+    const jobData = after;
+
+    const vehicleSnap = await admin.firestore().doc(`vehicles/${vehicleId}`).get();
+    const v = vehicleSnap.exists ? vehicleSnap.data() : {};
+    const isTestVehicle = v?.isTest === true;
+
+    const type = v.type || 'Vehicle';
+    const plate = v.plate || 'Unknown Plate';
+    const notes = v.notes ? `(${v.notes})` : '';
+    const vehicleInfo = `${type} - ${plate} ${notes}`.trim();
+
+    const startDate = formatDate(jobData.startDate || jobData.createdAt);
+    const prFileLink = formatPurchaseInfo(jobData.purchaseFileUrl, jobData.purchaseFileName);
+    const proformaLink = formatPurchaseInfo(jobData.updatedProformaUrl, jobData.updatedProformaFileName);
+
+    const preApprovedBy = jobData.preApprovedBy || 'N/A';
+    const preApprovedAt = formatDate(jobData.preApprovedAt || new Date());
+    const finalApprovedBy = jobData.finalApprovedBy || 'N/A';
+    const finalApprovedAt = formatDate(jobData.finalApprovedAt || new Date());
+
+    const approvalNoteText = jobData.approvalNote
+      ? `\n\n📝 Approbation Instructions:\n${jobData.approvalNote}\n`
+      : '';
+
+    let toRecipients = [];
+    let ccRecipients = [];
+
+    // =============================
+    // A) TRANSFER JOB FINAL APPROVAL
+    // =============================
+    if (jobData.transfer) {
+      toRecipients = isTestVehicle
+        ? await getEmailList('defaultTest')
+        : await getEmailList('defaulttransfer');
+
+      ccRecipients = jobData.requester ? [jobData.requester] : [];
+
+      const mailOptions = {
+        to: [...new Set(toRecipients)],
+        cc: [...new Set(ccRecipients)],
+        subject: `🚨 TRANSFER FINAL APPROVED: ${vehicleInfo}`,
+        text: `Hello team,
+
+This TRANSFER job has been Pre-approved & FINAL APPROVED for vehicle: ${vehicleInfo}. Please proceed to the transfer.
+
+🧾 Job ID: ${jobData.jobNumber || jobId}
+📋 Description: ${jobData.description}
+👤 Requester: ${jobData.requester}
+👷‍♂️ Mechanic: ${jobData.mechanic}
+📅 Start Date: ${startDate}
+📎 Purchase Request File: ${prFileLink}
+📎 Proforma: ${proformaLink}
+
+${approvalNoteText}
+
+✅ Pre-approved by: ${preApprovedBy} on ${preApprovedAt}
+✅ Final Approved by: ${finalApprovedBy} on ${finalApprovedAt}
+
+Access the Fleet App:
+https://mdc-001.github.io/fleet-madacan/
+
+Thanks,
+Fleet Management System`
+      };
+
+      console.log("📤 Sending transfer final approval email:", JSON.stringify(mailOptions, null, 2));
+      await sendWithRetry(mailOptions);
+      return;
+    }
+
+    // =============================
+    // B) NORMAL FINAL APPROVAL
+    // =============================
+    let recipientEmails = [];
+    let scmRecipients = [];
+
+    if (isTestVehicle) {
+      recipientEmails = await getEmailList('defaultTest');
+      console.log(`🚧 Test vehicle: sending FINAL APPROVAL email ONLY to defaultTest:`, recipientEmails);
+    } else {
+      recipientEmails = await getEmailList('defaultAlways');
+
+      const pre = v?.preApprovalEmail || await getEmailList('defaultPreApproval');
+      const final = v?.finalApprovalEmail || await getEmailList('defaultFinalApproval');
+      const owner = v?.recipientEmail;
+
+      recipientEmails = [
+        ...recipientEmails,
+        ...(Array.isArray(pre) ? pre : [pre]),
+        ...(Array.isArray(final) ? final : [final]),
+        ...(Array.isArray(owner) ? owner : owner ? [owner] : [])
+      ];
+
+      const area = (v?.Area || '').toUpperCase();
+
+      if (area === 'TNR') {
+        scmRecipients = [...await getEmailList('scmTNR'), ...await getEmailList('scmFleet')];
+      } else if (area === 'TOAMASINA') {
+        scmRecipients = [...await getEmailList('scmTMM'), ...await getEmailList('scmFleet')];
+      } else if (area === 'MORAMANGA') {
+        scmRecipients = [...await getEmailList('scmTMM'), ...await getEmailList('scmTNR'), ...await getEmailList('scmFleet')];
+      } else {
+        scmRecipients = await getEmailList('scmTMM');
+      }
+    }
+
+    const mailOptions = {
+      to: [...new Set(isTestVehicle ? recipientEmails : scmRecipients)],
+      cc: [...new Set(isTestVehicle ? [] : recipientEmails)],
+      subject: `✅ FLEET APP: Final Approval for ${vehicleInfo}`,
+      text: `Hello team,
+
+A job has been Pre-approved & FINAL APPROVED for vehicle: ${vehicleInfo}, please proceed with P.O.
+
+🧾 Job ID: ${jobData.jobNumber || jobId}
+📋 Description: ${jobData.description}
+👤 Requester: ${jobData.requester}
+👷‍♂️ Mechanic: ${jobData.mechanic}
+📅 Start Date: ${startDate}
+📎 Purchase Request File: ${prFileLink}
+📎 Proforma: ${proformaLink}
+
+${approvalNoteText}
+
+✅ Pre-approved by: ${preApprovedBy} on ${preApprovedAt}
+✅ Final Approved by: ${finalApprovedBy} on ${finalApprovedAt}
+
+Access the Fleet App:
+https://mdc-001.github.io/fleet-madacan/
+
+Thanks,
+Fleet Management System`
+    };
+
+    console.log("📤 Sending final approval email:", JSON.stringify(mailOptions, null, 2));
+    await sendWithRetry(mailOptions);
+  }
+});
