@@ -5,7 +5,6 @@ export default async function handler(req, res) {
     return res.status(405).json({ success: false, error: "Method not allowed" });
   }
 
-  // ✅ Authorization check
   const authHeader = req.headers.authorization || "";
   const token = authHeader.replace("Bearer ", "");
   if (token !== process.env.API_SECRET) {
@@ -13,20 +12,17 @@ export default async function handler(req, res) {
   }
 
   const { to, cc, subject, text } = req.body;
-
-  // ✅ Verify required fields
   if (!to || !subject || !text) {
     return res.status(400).json({ success: false, error: "Missing required fields" });
   }
 
   try {
-    // ✅ Create transporter for madacan.com SMTP
     const transporter = nodemailer.createTransport({
       host: "mail.madacan.com",
       port: 587,              // TLS port
       secure: false,          // false for TLS (true only if using port 465/SSL)
       auth: {
-        user: process.env.EMAIL_USER, // QUANTUMI\\applications
+        user: process.env.EMAIL_USER, // applications
         pass: process.env.EMAIL_PASS, // #17112025+App
       },
       tls: {
@@ -35,15 +31,13 @@ export default async function handler(req, res) {
       }
     });
 
-    // ✅ Send mail with proper "from" address
-  await transporter.sendMail({
-  from: `"Fleet App" <${process.env.EMAIL_USER}>`,  // ✅ match auth user
-  to,
-  cc,
-  subject,
-  text,
-});
-
+    await transporter.sendMail({
+      from: `"Fleet App" <noreply@madacan.com>`, // ✅ valid sender address
+      to,
+      cc,
+      subject,
+      text,
+    });
 
     return res.status(200).json({ success: true });
   } catch (error) {
