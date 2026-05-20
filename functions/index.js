@@ -30,7 +30,41 @@ const formatPurchaseInfo = (url, name) => {
   return url ? `${name || 'Purchase Request'}: ${url}` : 'N/A';
 };
 
-// ✅ Revised Job Creation Email using Vercel endpoint
+// 🔄 Retry wrapper for fetch
+const sendWithRetry = async (mailOptions, maxRetries = 3) => {
+  const endpoint = "https://project-ja0r1.vercel.app/api/sendEmail"; // ✅ fixed
+  let attempt = 0;
+  while (attempt < maxRetries) {
+    try {
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${process.env.API_SECRET || 'fleet-secret-2026'}`
+        },
+        body: JSON.stringify(mailOptions),
+      });
+      if (res.ok) {
+        console.log(`✅ Email sent successfully on attempt ${attempt + 1}`);
+        return true;
+      } else {
+        console.error(`❌ Attempt ${attempt + 1} failed: ${res.statusText}`);
+      }
+    } catch (err) {
+      console.error(`❌ Attempt ${attempt + 1} error:`, err);
+    }
+    attempt++;
+    await new Promise(r => setTimeout(r, 1000 * attempt)); // exponential backoff
+  }
+  console.error("❌ All retries failed. Logging to failedEmails collection.");
+  await admin.firestore().collection("failedEmails").add({
+    mailOptions,
+    createdAt: admin.firestore.FieldValue.serverTimestamp()
+  });
+  return false;
+};
+
+// ✅ Job Creation Email
 exports.sendJobCreatedEmail = onDocumentCreated({
   document: 'vehicles/{vehicleId}/jobs/{jobId}'
 }, async (event) => {
@@ -59,11 +93,9 @@ exports.sendJobCreatedEmail = onDocumentCreated({
 
   // ✅ TRANSFER JOBS
   if (jobData.transfer) {
-    if (isTestVehicle) {
-      toRecipients = await getEmailList('defaultTest');
-    } else {
-      toRecipients = await getEmailList('defaulttransfer');
-    }
+    toRecipients = isTestVehicle
+      ? await getEmailList('defaultTest')
+      : await getEmailList('defaulttransfer');
 
     const ccRequester = jobData.requester ? [jobData.requester] : [];
     ccRecipients = ccRequester;
@@ -74,8 +106,8 @@ exports.sendJobCreatedEmail = onDocumentCreated({
     }
 
     const mailOptions = {
-      to: toRecipients,
-      cc: ccRecipients,
+      to: [...new Set(toRecipients)],
+      cc: [...new Set(ccRecipients)],
       subject: `🚨 TRANSFER JOB CREATED: ${vehicleInfo}`,
       text: `Hello team,
 
@@ -92,24 +124,12 @@ Thanks,
 Fleet Management System`
     };
 
-    try {
-      await fetch("https://fleet-mail-service.vercel.app/api/sendEmail", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${process.env.API_SECRET}` // optional
-        },
-        body: JSON.stringify(mailOptions),
-      });
-      console.log('✅ Transfer job email forwarded to Vercel');
-    } catch (error) {
-      console.error('❌ Failed to call Vercel endpoint:', error);
-    }
-
+    console.log("📤 Sending transfer job email:", JSON.stringify(mailOptions, null, 2));
+    await sendWithRetry(mailOptions);
     return;
   }
 
-  // ✅ NORMAL JOBS (transfer = false)
+  // ✅ NORMAL JOBS
   if (!isTestVehicle) {
     toRecipients = await getEmailList('defaultPreApproval');
 
@@ -120,15 +140,15 @@ Fleet Management System`
         : [ownerEmail]
       : [];
     const ccDefault = await getEmailList('defaultAlways');
-    ccRecipients = [...ccVehicle, ...ccDefault];
-  } else if (isTestVehicle) {
+    ccRecipients = [...new Set([...ccVehicle, ...ccDefault])];
+  } else {
     toRecipients = await getEmailList('defaultTest');
     ccRecipients = [];
   }
 
   const mailOptions = {
-    to: toRecipients,
-    cc: ccRecipients,
+    to: [...new Set(toRecipients)],
+    cc: [...new Set(ccRecipients)],
     subject: `🚠 FLEET APP: New Job Created for ${vehicleInfo}`,
     text: `Hello team,
 
@@ -148,17 +168,460 @@ Thanks,
 Fleet Management System`
   };
 
-  try {
-    await fetch("https://fleet-mail-service.vercel.app/api/sendEmail", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${process.env.API_SECRET}` // optional
-      },
-      body: JSON.stringify(mailOptions),
-    });
-    console.log('✅ Normal job creation email forwarded to Vercel');
-  } catch (error) {
-    console.error('❌ Failed to call Vercel endpoint:', error);
+  console.log("📤 Sending normal job email:", JSON.stringify(mailOptions, null, 2));
+  await sendWithRetry(mailOptions);
+});
+
+const { onDocumentUpdated } = require('firebase-functions/v2/firestore');
+
+// ✅ 2. FINAL PRE-APPROVAL EMAIL
+exports.sendPreApprovalNotification = onDocumentUpdated({
+  document: 'vehicles/{vehicleId}/jobs/{jobId}'
+}, async (event) => {
+  const before = event.data.before.data();
+  const after = event.data.after.data();
+  const { vehicleId, jobId } = event.params;
+
+  // Trigger only when adminApprovalStatus flips to Approved
+  if (before.adminApprovalStatus !== 'Approved' && after.adminApprovalStatus === 'Approved') {
+    const jobData = after;
+
+    const vehicleSnap = await admin.firestore().doc(`vehicles/${vehicleId}`).get();
+    const v = vehicleSnap.exists ? vehicleSnap.data() : {};
+    const isTestVehicle = v?.isTest === true;
+
+    const type = v.type || 'Vehicle';
+    const plate = v.plate || 'Unknown Plate';
+    const notes = v.notes ? `(${v.notes})` : '';
+    const vehicleInfo = `${type} - ${plate} ${notes}`.trim();
+
+    const startDate = formatDate(jobData.startDate || jobData.createdAt);
+    const prFileLink = formatPurchaseInfo(jobData.purchaseFileUrl, jobData.purchaseFileName);
+    const approvedBy = jobData.approvedBy || 'N/A';
+    const approvedAt = formatDate(jobData.approvedAt || new Date());
+    const preApprovalMeta = `Approved by: ${approvedBy} on ${approvedAt}`;
+
+    // Helpers
+    const asArray = (x) => (Array.isArray(x) ? x : (x ? [x] : [])).filter(Boolean);
+    const looksLikeEmail = (s) => typeof s === 'string' && s.includes('@');
+
+    let toRecipients = [];
+    let ccRecipients = [];
+
+    // =============================
+    // A) TRANSFER JOB PRE-APPROVAL
+    // =============================
+    if (jobData.transfer) {
+      toRecipients = isTestVehicle
+        ? await getEmailList('defaultTest')
+        : await getEmailList('defaulttransfer');
+
+      const requesterEmail = looksLikeEmail(jobData.requesterEmail || jobData.requester)
+        ? (jobData.requesterEmail || jobData.requester)
+        : null;
+      ccRecipients = asArray(requesterEmail);
+
+      if (toRecipients.length === 0 && ccRecipients.length > 0) {
+        toRecipients = ccRecipients;
+        ccRecipients = [];
+      }
+      if (toRecipients.length === 0) {
+        toRecipients = await getEmailList('defaultAlways');
+      }
+      if (toRecipients.length === 0 && ccRecipients.length === 0) {
+        console.error('❌ No recipients configured for TRANSFER pre-approval. Aborting send.');
+        return;
+      }
+
+      const mailOptions = {
+        to: [...new Set(toRecipients)],
+        cc: [...new Set(ccRecipients)],
+        subject: `🚨 TRANSFER PRE-APPROVED: ${vehicleInfo}`,
+        text: `Hello team,
+
+This TRANSFER job has been PRE-APPROVED for vehicle: ${vehicleInfo}.
+
+🧾 Job ID: ${jobData.jobNumber || jobId}
+👤 Requester: ${jobData.requester}
+👷‍♂️ Mechanic: ${jobData.mechanic}
+📋 Description: ${jobData.description}
+📅 Start Date: ${startDate}
+📎 Purchase Request File: ${prFileLink}
+
+✅ ${preApprovalMeta}
+
+Access the Fleet App:
+https://mdc-001.github.io/fleet-madacan/
+
+Thanks,
+Fleet Management System`
+      };
+
+      console.log("📤 Sending transfer pre-approval email:", JSON.stringify(mailOptions, null, 2));
+      await sendWithRetry(mailOptions);
+      return;
+    }
+
+    // =============================
+    // B) NORMAL PRE-APPROVAL
+    // =============================
+    if (isTestVehicle) {
+      toRecipients = await getEmailList('defaultTest');
+    } else {
+      const pre = v.preApprovalEmail || await getEmailList('defaultPreApproval');
+      const final = v.finalApprovalEmail || await getEmailList('defaultFinalApproval');
+      ccRecipients = [...asArray(pre), ...asArray(final)];
+
+      const verifiers = await getEmailList('defaultVerificator');
+      const area = (v.Area || '').toUpperCase();
+
+      let scmTeam = [];
+      if (area === 'TNR') {
+        scmTeam = [...await getEmailList('scmTNR'), ...await getEmailList('scmFleet')];
+      } else if (area === 'TOAMASINA') {
+        scmTeam = [...await getEmailList('scmTMM'), ...await getEmailList('scmFleet')];
+      } else if (area === 'MORAMANGA') {
+        scmTeam = [...await getEmailList('scmTMM'), ...await getEmailList('scmTNR'), ...await getEmailList('scmFleet')];
+      } else {
+        const fallbackDoc = area === 'TNR' ? 'scmTNR' : 'scmTMM';
+        scmTeam = await getEmailList(fallbackDoc);
+      }
+
+      toRecipients = [...asArray(verifiers), ...asArray(scmTeam)];
+    }
+
+    if (toRecipients.length === 0 && ccRecipients.length === 0) {
+      toRecipients = await getEmailList('defaultAlways');
+    }
+    if (toRecipients.length === 0 && ccRecipients.length === 0) {
+      const requesterEmail = looksLikeEmail(jobData.requesterEmail || jobData.requester)
+        ? (jobData.requesterEmail || jobData.requester)
+        : null;
+      ccRecipients = asArray(requesterEmail);
+    }
+    if (toRecipients.length === 0 && ccRecipients.length === 0) {
+      console.error('❌ No recipients for NORMAL pre-approval. Aborting send.');
+      return;
+    }
+
+    const mailOptions = {
+      to: [...new Set(toRecipients)],
+      cc: [...new Set(ccRecipients)],
+      subject: `🛡️ FLEET APP: Job Pre-Approved for ${vehicleInfo}`,
+      text: `Hello team,
+
+A job has been PRE-APPROVED for vehicle: ${vehicleInfo}
+
+SCM Team: "Please submit selected proforma when ready by replying to this email to Fleet maintenance"
+
+🧾 Job ID: ${jobData.jobNumber || jobId}
+📋 Description: ${jobData.description}
+👤 Requester: ${jobData.requester}
+👷‍♂️ Mechanic: ${jobData.mechanic}
+📅 Start Date: ${startDate}
+📎 Purchase Request File: ${prFileLink}
+
+✅ ${preApprovalMeta}
+
+Access the Fleet App:
+https://mdc-001.github.io/fleet-madacan/
+
+Thanks,
+Fleet Management System`
+    };
+
+    console.log("📤 Sending normal pre-approval email:", JSON.stringify(mailOptions, null, 2));
+    await sendWithRetry(mailOptions);
+  }
+});
+
+const { onDocumentUpdated } = require('firebase-functions/v2/firestore');
+
+// ✅ FINAL APPROVAL EMAIL with Transfer rule
+exports.sendFinalApprovalNotification = onDocumentUpdated({
+  document: 'vehicles/{vehicleId}/jobs/{jobId}'
+}, async (event) => {
+  const before = event.data.before.data();
+  const after = event.data.after.data();
+  const { vehicleId, jobId } = event.params;
+
+  // ✅ Check if final approval just happened
+  if (before.finalApprovalStatus !== 'Approved' && after.finalApprovalStatus === 'Approved') {
+    const jobData = after;
+    let vehicleInfo = vehicleId;
+    let toRecipients = [];
+    let ccRecipients = [];
+    let isTestVehicle = false;
+
+    // Fetch vehicle document safely
+    const vehicleSnap = await admin.firestore().doc(`vehicles/${vehicleId}`).get();
+    let v = null;
+    if (vehicleSnap.exists) {
+      v = vehicleSnap.data();
+      isTestVehicle = v?.isTest === true;
+      const type = v.type || 'Vehicle';
+      const plate = v.plate || 'Unknown Plate';
+      const notes = v.notes ? `(${v.notes})` : '';
+      vehicleInfo = `${type} - ${plate} ${notes}`.trim();
+    }
+
+    const startDate = formatDate(jobData.startDate || jobData.createdAt);
+    const prFileLink = formatPurchaseInfo(jobData.purchaseFileUrl, jobData.purchaseFileName);
+    const proformaLink = formatPurchaseInfo(jobData.updatedProformaUrl, jobData.updatedProformaFileName);
+
+    const preApprovedBy = jobData.preApprovedBy || 'N/A';
+    const preApprovedAt = formatDate(jobData.preApprovedAt || new Date());
+    const finalApprovedBy = jobData.finalApprovedBy || 'N/A';
+    const finalApprovedAt = formatDate(jobData.finalApprovedAt || new Date());
+
+    const approvalNoteText = jobData.approvalNote
+      ? `\n\n📝 Approbation Instructions:\n${jobData.approvalNote}\n`
+      : '';
+
+    // =============================
+    // A) TRANSFER JOB FINAL APPROVAL
+    // =============================
+    if (jobData.transfer) {
+      toRecipients = isTestVehicle
+        ? await getEmailList('defaultTest')
+        : await getEmailList('defaulttransfer');
+
+      ccRecipients = jobData.requester ? [jobData.requester] : [];
+
+      const mailOptions = {
+        to: [...new Set(toRecipients)],
+        cc: [...new Set(ccRecipients)],
+        subject: `🚨 TRANSFER FINAL APPROVED: ${vehicleInfo}`,
+        text: `Hello team,
+
+This TRANSFER job Pre-approved & FINAL APPROVED for vehicle: ${vehicleInfo}. Please proceed to the transfer
+
+🧾 Job ID: ${jobData.jobNumber || jobId}
+📋 Description: ${jobData.description}
+👤 Requester: ${jobData.requester}
+👷‍♂️ Mechanic: ${jobData.mechanic}
+📅 Start Date: ${startDate}
+📎 Purchase Request File: ${prFileLink}
+📎 Proforma: ${proformaLink}
+
+${approvalNoteText}
+
+✅ Pre-approved by: ${preApprovedBy} on ${preApprovedAt}
+✅ Final Approved by: ${finalApprovedBy} on ${finalApprovedAt}
+
+Access the Fleet App:
+https://mdc-001.github.io/fleet-madacan/
+
+Thanks,
+Fleet Management System`
+      };
+
+      console.log("📤 Sending transfer final approval email:", JSON.stringify(mailOptions, null, 2));
+      await sendWithRetry(mailOptions);
+      return; // skip normal branch
+    }
+
+    // =============================
+    // B) NORMAL FINAL APPROVAL
+    // =============================
+    let recipientEmails = [];
+    let scmRecipients = [];
+
+    if (isTestVehicle) {
+      recipientEmails = await getEmailList('defaultTest');
+      console.log(`🚧 Test vehicle: sending FINAL APPROVAL email ONLY to defaultTest:`, recipientEmails);
+    } else {
+      recipientEmails = await getEmailList('defaultAlways');
+
+      const pre = v?.preApprovalEmail || await getEmailList('defaultPreApproval');
+      const final = v?.finalApprovalEmail || await getEmailList('defaultFinalApproval');
+      const owner = v?.recipientEmail;
+
+      recipientEmails = [
+        ...recipientEmails,
+        ...(Array.isArray(pre) ? pre : [pre]),
+        ...(Array.isArray(final) ? final : [final]),
+        ...(Array.isArray(owner) ? owner : owner ? [owner] : [])
+      ];
+
+      const area = (v?.Area || '').toUpperCase();
+
+      if (area === 'TNR') {
+        scmRecipients = [...await getEmailList('scmTNR'), ...await getEmailList('scmFleet')];
+      } else if (area === 'TOAMASINA') {
+        scmRecipients = [...await getEmailList('scmTMM'), ...await getEmailList('scmFleet')];
+      } else if (area === 'MORAMANGA') {
+        scmRecipients = [...await getEmailList('scmTMM'), ...await getEmailList('scmTNR'), ...await getEmailList('scmFleet')];
+      } else {
+        const fallbackDoc = area === 'TNR' ? 'scmTNR' : 'scmTMM';
+        scmRecipients = await getEmailList(fallbackDoc);
+      }
+    }
+
+    const mailOptions = {
+      to: isTestVehicle ? [...new Set(recipientEmails)] : [...new Set(scmRecipients)],
+      cc: isTestVehicle ? [] : [...new Set(recipientEmails)],
+      subject: `✅ FLEET APP: Final Approval for ${vehicleInfo}`,
+      text: `Hello team,
+
+A job has been Pre-approved & FINAL APPROVED for vehicle: ${vehicleInfo}, please proceed with P.O.
+
+🧾 Job ID: ${jobData.jobNumber || jobId}
+📋 Description: ${jobData.description}
+👤 Requester: ${jobData.requester}
+👷‍♂️ Mechanic: ${jobData.mechanic}
+📅 Start Date: ${startDate}
+📎 Purchase Request File: ${prFileLink}
+📎 Proforma: ${proformaLink}
+
+${approvalNoteText}
+
+✅ Pre-approved by: ${preApprovedBy} on ${preApprovedAt}
+✅ Final Approved by: ${finalApprovedBy} on ${finalApprovedAt}
+
+Access the Fleet App:
+https://mdc-001.github.io/fleet-madacan/
+
+Thanks,
+Fleet Management System`
+    };
+
+    console.log("📤 Sending normal final approval email:", JSON.stringify(mailOptions, null, 2));
+    await sendWithRetry(mailOptions);
+  }
+});
+
+const { onDocumentUpdated } = require('firebase-functions/v2/firestore');
+
+// ✅ 4. PR Upload Notification (NEW)
+exports.sendPRUploadNotification = onDocumentUpdated({
+  document: 'vehicles/{vehicleId}/jobs/{jobId}'
+}, async (event) => {
+  const before = event.data.before.data();
+  const after = event.data.after.data();
+  const { vehicleId, jobId } = event.params;
+
+  // ✅ Only trigger if PR file was just uploaded
+  if (!before.purchaseFileUrl && after.purchaseFileUrl) {
+    const jobData = after;
+    let vehicleInfo = vehicleId;
+    let recipientEmails = [];
+
+    const vehicleSnap = await admin.firestore().doc(`vehicles/${vehicleId}`).get();
+    const v = vehicleSnap.exists ? vehicleSnap.data() : {};
+    const isTestVehicle = v?.isTest === true;
+
+    const type = v.type || 'Vehicle';
+    const plate = v.plate || 'Unknown Plate';
+    const notes = v.notes ? `(${v.notes})` : '';
+    vehicleInfo = `${type} - ${plate} ${notes}`.trim();
+
+    if (isTestVehicle) {
+      recipientEmails = await getEmailList('defaultTest');
+      console.log(`🚧 Test vehicle: sending PR Upload email ONLY to defaultTest:`, recipientEmails);
+    } else {
+      recipientEmails = await getEmailList('defaultAlways');
+      if (v.recipientEmail) {
+        recipientEmails.push(...(Array.isArray(v.recipientEmail) ? v.recipientEmail : [v.recipientEmail]));
+      }
+    }
+
+    const startDate = formatDate(jobData.startDate || jobData.createdAt);
+    const prFileLink = formatPurchaseInfo(jobData.purchaseFileUrl, jobData.purchaseFileName);
+
+    const mailOptions = {
+      to: [...new Set(recipientEmails)],
+      subject: `📎 FLEET APP: Job updated with PR Uploaded for ${vehicleInfo}`,
+      text: `Hello team,
+
+A Purchase Request file has been uploaded for vehicle: ${vehicleInfo}.
+
+🧾 Job ID: ${jobData.jobNumber || jobId}
+📋 Description: ${jobData.description}
+👤 Requester: ${jobData.requester}
+👷‍♂️ Mechanic: ${jobData.mechanic}
+📅 Start Date: ${startDate}
+📎 Purchase Request File: ${prFileLink}
+
+Access the Fleet App:
+https://mdc-001.github.io/fleet-madacan/
+
+Thanks,
+Fleet Management System`
+    };
+
+    console.log("📤 Sending PR upload email:", JSON.stringify(mailOptions, null, 2));
+    await sendWithRetry(mailOptions);
+  }
+});
+
+
+const { onDocumentUpdated } = require('firebase-functions/v2/firestore');
+
+// ✅ 7. Updated Proforma Notification (with defaultTest logic)
+exports.sendUpdatedProformaNotification = onDocumentUpdated({
+  document: 'vehicles/{vehicleId}/jobs/{jobId}'
+}, async (event) => {
+  const before = event.data.before.data();
+  const after = event.data.after.data();
+  const { vehicleId, jobId } = event.params;
+
+  // ✅ Only trigger if updatedProformaUrl was just added
+  if (!before.updatedProformaUrl && after.updatedProformaUrl) {
+    const jobData = after;
+    let vehicleInfo = vehicleId;
+
+    const vehicleSnap = await admin.firestore().doc(`vehicles/${vehicleId}`).get();
+    const v = vehicleSnap.exists ? vehicleSnap.data() : {};
+    const isTestVehicle = v?.isTest === true;
+
+    const type = v.type || 'Vehicle';
+    const plate = v.plate || 'Unknown Plate';
+    const notes = v.notes ? `(${v.notes})` : '';
+    vehicleInfo = `${type} - ${plate} ${notes}`.trim();
+
+    let toRecipients = [];
+    let ccRecipients = [];
+
+    if (isTestVehicle) {
+      toRecipients = await getEmailList('defaultTest');
+      console.log(`🚧 Test vehicle: sending Updated Proforma email ONLY to defaultTest:`, toRecipients);
+    } else {
+      toRecipients = [
+        ...(await getEmailList('defaultFinalApproval')),
+        ...(await getEmailList('defaultVerificator'))
+      ];
+      ccRecipients = await getEmailList('defaultPreApproval');
+    }
+
+    const startDate = formatDate(jobData.startDate || jobData.createdAt);
+    const prFileLink = formatPurchaseInfo(jobData.purchaseFileUrl, jobData.purchaseFileName);
+    const proformaLink = formatPurchaseInfo(jobData.updatedProformaUrl, jobData.updatedProformaFileName);
+
+    const mailOptions = {
+      to: [...new Set(toRecipients)],
+      cc: [...new Set(ccRecipients)],
+      subject: `📤 FLEET APP: Updated Proforma uploaded for ${vehicleInfo}`,
+      text: `Hello team,
+
+A job for vehicle ${vehicleInfo} has received an UPDATED PROFORMA file. Awaiting further instructions and approbation.
+
+🧾 Job ID: ${jobData.jobNumber || jobId}
+📋 Description: ${jobData.description}
+👤 Requester: ${jobData.requester}
+👷‍♂️ Mechanic: ${jobData.mechanic}
+📅 Start Date: ${startDate}
+📎 Purchase Request File: ${prFileLink}
+📎 Proforma: ${proformaLink}
+
+Access the Fleet App:
+https://mdc-001.github.io/fleet-madacan/
+
+Thanks,
+Fleet Management System`
+    };
+
+    console.log("📤 Sending updated proforma email:", JSON.stringify(mailOptions, null, 2));
+    await sendWithRetry(mailOptions);
   }
 });
