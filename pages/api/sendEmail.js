@@ -36,13 +36,14 @@ export default async function handler(req, res) {
     });
 
     // ✅ Send mail with proper "from" address
-    await transporter.sendMail({
-      from: `"Fleet App" <applications@madacan.com>`, // must be a valid email
-      to,
-      cc,
-      subject,
-      text,
-    });
+  await transporter.sendMail({
+  from: `"Fleet App" <${process.env.EMAIL_USER}>`,  // ✅ match auth user
+  to,
+  cc,
+  subject,
+  text,
+});
+
 
     return res.status(200).json({ success: true });
   } catch (error) {
