@@ -548,3 +548,136 @@ Fleet Management System`
     await sendWithRetry(mailOptions);
   }
 });
+
+// ✅ Final Approval Rejection Notification
+exports.sendFinalRejectionNotification = onDocumentUpdated({
+  document: 'vehicles/{vehicleId}/jobs/{jobId}'
+}, async (event) => {
+  const before = event.data.before.data();
+  const after = event.data.after.data();
+  const { vehicleId, jobId } = event.params;
+
+  // Trigger only when finalApprovalStatus flips to Rejected
+  if (before.finalApprovalStatus !== 'Rejected' && after.finalApprovalStatus === 'Rejected') {
+    const jobData = after;
+
+    const vehicleSnap = await admin.firestore().doc(`vehicles/${vehicleId}`).get();
+    const v = vehicleSnap.exists ? vehicleSnap.data() : {};
+    const isTestVehicle = v?.isTest === true;
+
+    const type = v.type || 'Vehicle';
+    const plate = v.plate || 'Unknown Plate';
+    const notes = v.notes ? `(${v.notes})` : '';
+    const vehicleInfo = `${type} - ${plate} ${notes}`.trim();
+
+    const startDate = formatDate(jobData.startDate || jobData.createdAt);
+    const prFileLink = formatPurchaseInfo(jobData.purchaseFileUrl, jobData.purchaseFileName);
+    const proformaLink = formatPurchaseInfo(jobData.updatedProformaUrl, jobData.updatedProformaFileName);
+
+    const rejectedBy = jobData.finalApprovedBy || jobData.approvedBy || 'N/A';
+    const rejectedAt = formatDate(jobData.finalApprovedAt || jobData.approvedAt || new Date());
+    const approbationNote = jobData.approvalNote
+      ? `\n\n📝 Approbation Instructions:\n${jobData.approvalNote}`
+      : '';
+
+    let toRecipients = [];
+    let ccRecipients = [];
+
+    // =============================
+    // A) TRANSFER JOB FINAL REJECTION
+    // =============================
+    if (jobData.transfer) {
+      toRecipients = isTestVehicle
+        ? await getEmailList('defaultTest')
+        : await getEmailList('defaulttransfer');
+
+      ccRecipients = jobData.requester ? [jobData.requester] : [];
+
+      const mailOptions = {
+        to: [...new Set(toRecipients)],
+        cc: [...new Set(ccRecipients)],
+        subject: `❌ TRANSFER FINAL REJECTED: ${vehicleInfo}`,
+        text: `Hello team,
+
+This TRANSFER job has been FINAL REJECTED for vehicle: ${vehicleInfo}.
+
+🧾 Job ID: ${jobData.jobNumber || jobId}
+📋 Description: ${jobData.description}
+👤 Requester: ${jobData.requester}
+👷‍♂️ Mechanic: ${jobData.mechanic}
+📅 Start Date: ${startDate}
+📎 Purchase Request File: ${prFileLink}
+📎 Proforma: ${proformaLink}
+
+❌ Rejected by: ${rejectedBy} on ${rejectedAt}
+
+${approbationNote}
+
+Thanks,
+Fleet Management System`
+      };
+
+      console.log("📤 Sending transfer final rejection email:", JSON.stringify(mailOptions, null, 2));
+      await sendWithRetry(mailOptions);
+      return;
+    }
+
+    // =============================
+    // B) NORMAL FINAL REJECTION
+    // =============================
+    let recipientEmails = [];
+
+    if (isTestVehicle) {
+      recipientEmails = await getEmailList('defaultTest');
+      console.log(`🚧 Test vehicle: sending Final Rejection email ONLY to defaultTest:`, recipientEmails);
+    } else {
+      const always = await getEmailList('defaultAlways');
+      const pre = v.preApprovalEmail || await getEmailList('defaultPreApproval');
+      const final = v.finalApprovalEmail || await getEmailList('defaultFinalApproval');
+      const owner = v.recipientEmail;
+
+      const additional = [
+        ...(Array.isArray(pre) ? pre : [pre]),
+        ...(Array.isArray(final) ? final : [final]),
+        ...(Array.isArray(owner) ? owner : owner ? [owner] : [])
+      ];
+
+      const area = (v.Area || '').toUpperCase();
+      const scmFallback = await getEmailList(area === 'TNR' ? 'scmTNR' : 'scmTMM');
+
+      recipientEmails = [
+        ...always,
+        ...additional.filter(email => !scmFallback.includes(email))
+      ];
+    }
+
+    const mailOptions = {
+      to: [...new Set(recipientEmails)],
+      subject: `❌ FLEET APP: Final Approval REJECTED for ${vehicleInfo}`,
+      text: `Hello team,
+
+The FINAL APPROVAL for a job has been REJECTED for vehicle: ${vehicleInfo}.
+
+🧾 Job ID: ${jobData.jobNumber || jobId}
+📋 Description: ${jobData.description}
+👤 Requester: ${jobData.requester}
+👷‍♂️ Mechanic: ${jobData.mechanic}
+📅 Start Date: ${startDate}
+📎 Purchase Request File: ${prFileLink}
+📎 Proforma: ${proformaLink}
+
+❌ Rejected by: ${rejectedBy} on ${rejectedAt}
+
+${approbationNote}
+
+Access the Fleet App:
+https://mdc-001.github.io/fleet-madacan/
+
+Thanks,
+Fleet Management System`
+    };
+
+    console.log("📤 Sending final rejection email:", JSON.stringify(mailOptions, null, 2));
+    await sendWithRetry(mailOptions);
+  }
+});
