@@ -333,7 +333,72 @@ Fleet Management System`
   }
 });
 
+// ✅ Updated Proforma Notification
+exports.sendUpdatedProformaNotification = onDocumentUpdated({
+  document: 'vehicles/{vehicleId}/jobs/{jobId}'
+}, async (event) => {
+  const before = event.data.before.data();
+  const after = event.data.after.data();
+  const { vehicleId, jobId } = event.params;
 
+  // Trigger only when updatedProformaUrl was just added
+  if (!before.updatedProformaUrl && after.updatedProformaUrl) {
+    const jobData = after;
+
+    const vehicleSnap = await admin.firestore().doc(`vehicles/${vehicleId}`).get();
+    const v = vehicleSnap.exists ? vehicleSnap.data() : {};
+    const isTestVehicle = v?.isTest === true;
+
+    const type = v.type || 'Vehicle';
+    const plate = v.plate || 'Unknown Plate';
+    const notes = v.notes ? `(${v.notes})` : '';
+    const vehicleInfo = `${type} - ${plate} ${notes}`.trim();
+
+    let toRecipients = [];
+    let ccRecipients = [];
+
+    if (isTestVehicle) {
+      toRecipients = await getEmailList('defaultTest');
+      console.log(`🚧 Test vehicle: sending Updated Proforma email ONLY to defaultTest:`, toRecipients);
+    } else {
+      toRecipients = [
+        ...(await getEmailList('defaultFinalApproval')),
+        ...(await getEmailList('defaultVerificator'))
+      ];
+      ccRecipients = await getEmailList('defaultPreApproval');
+    }
+
+    const startDate = formatDate(jobData.startDate || jobData.createdAt);
+    const prFileLink = formatPurchaseInfo(jobData.purchaseFileUrl, jobData.purchaseFileName);
+    const proformaLink = formatPurchaseInfo(jobData.updatedProformaUrl, jobData.updatedProformaFileName);
+
+    const mailOptions = {
+      to: [...new Set(toRecipients)],
+      cc: [...new Set(ccRecipients)],
+      subject: `📤 FLEET APP: Updated Proforma uploaded for ${vehicleInfo}`,
+      text: `Hello team,
+
+A job for vehicle ${vehicleInfo} has received an UPDATED PROFORMA file. Awaiting further instructions and approbation.
+
+🧾 Job ID: ${jobData.jobNumber || jobId}
+📋 Description: ${jobData.description}
+👤 Requester: ${jobData.requester}
+👷‍♂️ Mechanic: ${jobData.mechanic}
+📅 Start Date: ${startDate}
+📎 Purchase Request File: ${prFileLink}
+📎 Proforma: ${proformaLink}
+
+Access the Fleet App:
+https://mdc-001.github.io/fleet-madacan/
+
+Thanks,
+Fleet Management System`
+    };
+
+    console.log("📤 Sending updated proforma email:", JSON.stringify(mailOptions, null, 2));
+    await sendWithRetry(mailOptions);
+  }
+});
 
 // ✅ Final Approval Notification Email
 exports.sendFinalApprovalNotification = onDocumentUpdated({
