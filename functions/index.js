@@ -334,9 +334,9 @@ Fleet Management System`
 });
 
 // ✅ Updated Proforma Notification
-// exports.sendUpdatedProformaNotification = onDocumentUpdated({
+exports.sendUpdatedProformaNotification = onDocumentUpdated({
   document: 'vehicles/{vehicleId}/jobs/{jobId}'
-//}, async (event) => {
+}, async (event) => {
   const before = event.data.before.data();
   const after = event.data.after.data();
   const { vehicleId, jobId } = event.params;
@@ -398,7 +398,7 @@ Fleet Management System`
     console.log("📤 Sending updated proforma email:", JSON.stringify(mailOptions, null, 2));
     await sendWithRetry(mailOptions);
   }
-//});
+});
 
 // ✅ Final Approval Notification Email
 exports.sendFinalApprovalNotification = onDocumentUpdated({
