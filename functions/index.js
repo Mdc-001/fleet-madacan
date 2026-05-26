@@ -681,3 +681,66 @@ Fleet Management System`
     await sendWithRetry(mailOptions);
   }
 });
+
+// ✅ PR Upload Notification
+exports.sendPRUploadNotification = onDocumentUpdated({
+  document: 'vehicles/{vehicleId}/jobs/{jobId}'
+}, async (event) => {
+  const before = event.data.before.data();
+  const after = event.data.after.data();
+  const { vehicleId, jobId } = event.params;
+
+  // Trigger only when purchaseFileUrl was newly added
+  if (!before.purchaseFileUrl && after.purchaseFileUrl) {
+    const jobData = after;
+
+    const vehicleSnap = await admin.firestore().doc(`vehicles/${vehicleId}`).get();
+    const v = vehicleSnap.exists ? vehicleSnap.data() : {};
+    const isTestVehicle = v?.isTest === true;
+
+    const type = v.type || 'Vehicle';
+    const plate = v.plate || 'Unknown Plate';
+    const notes = v.notes ? `(${v.notes})` : '';
+    const vehicleInfo = `${type} - ${plate} ${notes}`.trim();
+
+    let recipientEmails = [];
+
+    if (isTestVehicle) {
+      recipientEmails = await getEmailList('defaultTest');
+      console.log(`🚧 Test vehicle: sending PR Upload email ONLY to defaultTest:`, recipientEmails);
+    } else {
+      recipientEmails = await getEmailList('defaultAlways');
+
+      if (v.recipientEmail) {
+        recipientEmails.push(...(Array.isArray(v.recipientEmail) ? v.recipientEmail : [v.recipientEmail]));
+      }
+    }
+
+    const startDate = formatDate(jobData.startDate || jobData.createdAt);
+    const prFileLink = formatPurchaseInfo(jobData.purchaseFileUrl, jobData.purchaseFileName);
+
+    const mailOptions = {
+      to: [...new Set(recipientEmails)],
+      subject: `📎 FLEET APP: Job updated with PR Uploaded for ${vehicleInfo}`,
+      text: `Hello team,
+
+A Purchase Request file has been uploaded for vehicle: ${vehicleInfo}.
+
+🧾 Job ID: ${jobData.jobNumber || jobId}
+📋 Description: ${jobData.description}
+👤 Requester: ${jobData.requester}
+👷‍♂️ Mechanic: ${jobData.mechanic}
+📅 Start Date: ${startDate}
+📎 Purchase Request File: ${prFileLink}
+
+Access the Fleet App:
+https://mdc-001.github.io/fleet-madacan/
+
+Thanks,
+Fleet Management System`
+    };
+
+    console.log("📤 Sending PR upload email:", JSON.stringify(mailOptions, null, 2));
+    await sendWithRetry(mailOptions);
+  }
+});
