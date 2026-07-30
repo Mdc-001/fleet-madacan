@@ -744,3 +744,54 @@ Fleet Management System`
     await sendWithRetry(mailOptions);
   }
 });
+
+ 
+
+// ✅ Tire Service Creation Email
+exports.sendTireServiceCreatedEmail = onDocumentCreated({
+  document: 'customerServiceTracking/{requestId}'
+}, async (event) => {
+  const requestData = event.data.data();
+  const { requestId } = event.params;
+
+  // Load recipients from Firestore
+  const recipientsSnap = await admin.firestore().doc('emailRecipients/customerService').get();
+  if (!recipientsSnap.exists) {
+    console.warn('⚠️ No recipients configured for customerService');
+    return;
+  }
+  const recipients = recipientsSnap.data();
+
+  // For tire service → send to both user + scm
+  const toRecipients = [
+    ...(recipients.user || []),
+    ...(recipients.scm || [])
+  ];
+
+  if (toRecipients.length === 0) {
+    console.warn('⚠️ No recipients found for tire service. Skipping send.');
+    return;
+  }
+
+  const mailOptions = {
+    to: [...new Set(toRecipients)],
+    subject: `🛞 New Tire Service Request - ${requestData.plate || 'Unknown Plate'}`,
+    text: `Hello team,
+
+A new Tire Service request has been created.
+
+🧾 Request ID: ${requestId}
+🚗 Plate: ${requestData.plate || 'N/A'}
+👤 Driver: ${requestData.driverName || 'N/A'}
+🏢 Service Provider: ${requestData.serviceProvider || 'N/A'}
+📅 Created At: ${formatDate(requestData.createdAt)}
+
+Please log in to Fleet App to review and take action.
+
+Thanks,
+Fleet Management System`
+  };
+
+  console.log("📤 Sending tire service email:", JSON.stringify(mailOptions, null, 2));
+  await sendWithRetry(mailOptions);
+});
