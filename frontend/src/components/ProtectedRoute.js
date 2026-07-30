@@ -14,6 +14,7 @@ const ProtectedRoute = ({ children, allowedRoles }) => {
         setUser(currentUser);
         try {
           const snap = await getDoc(doc(db, "users", currentUser.uid));
+          // Normalize role to lowercase
           const firestoreRole = snap.data()?.role?.toLowerCase();
           setRole(firestoreRole || null);
         } catch (err) {
@@ -31,7 +32,7 @@ const ProtectedRoute = ({ children, allowedRoles }) => {
   }, []);
 
   if (loading) {
-    return <div>Loading...</div>; // ✅ visible while Firebase initializes
+    return <div>Loading...</div>;
   }
 
   if (!user) {
@@ -45,10 +46,11 @@ const ProtectedRoute = ({ children, allowedRoles }) => {
   }
 
   if (!normalizedAllowedRoles.includes(role)) {
-    return <div>Access denied</div>; // ✅ clear message instead of blank page
+    return <div>Access denied</div>;
   }
 
-  return children;
+  // Pass role down to children
+  return React.cloneElement(children, { role });
 };
 
 export default ProtectedRoute;
