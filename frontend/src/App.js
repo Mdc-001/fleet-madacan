@@ -13,6 +13,7 @@ import VerificatorDashboard from './pages/VerificatorDashboard';
 import WarehouseDashboard from './pages/WarehouseDashboard';
 import MaintenanceFollowUp from './pages/MaintenanceFollowUp';
 import SCMDashboard from './pages/SCMDashboard';
+import TireServiceTracking from './pages/CustomerServiceTracking';
 
 function App() {
   return (
@@ -65,6 +66,10 @@ function App() {
         path="/scm"
         element={<ProtectedRoute allowedRoles={['Scm']}><SCMDashboard /></ProtectedRoute>}
       />
+      <Route
+  path="/tire-service-tracking"
+  element={<ProtectedRoute allowedRoles={['Admin', 'User', 'Approval', 'verificator', 'storeroom', 'Scm']}><TireServiceTracking /></ProtectedRoute>}
+/>
 
       {/* Fallback route */}
       <Route path="*" element={<p>Page not found</p>} />
