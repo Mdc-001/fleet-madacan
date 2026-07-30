@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Service Actions</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+    }
+    table {
+      border-collapse: collapse;
+      margin-top: 20px;
+      width: 60%;
+    }
+    td {
+      padding: 10px;
+      border-bottom: 1px solid #ddd;
+    }
+    select {
+      padding: 5px;
+      font-weight: bold;
+    }
+    /* Placeholder style */
+    option[value=""] {
+      color: gray;
+    }
+    /* Approved style */
+    option[value="approved"] {
+      color: green;
+    }
+    /* Reject style */
+    option[value="reject"] {
+      color: red;
+    }
+
+    .status {
+      font-weight: bold;
+      margin-left: 10px;
+      padding: 3px 8px;
+      border-radius: 5px;
+    }
+    .approved {
+      color: white;
+      background-color: green;
+    }
+    .reject {
+      color: white;
+      background-color: red;
+    }
+    .pending {
+      color: black;
+      background-color: lightgray;
+    }
+
+    .modal {
+      display: none;
+      position: fixed;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      background: #fff;
+      padding: 20px;
+      border: 1px solid #ccc;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+      z-index: 1000;
+    }
+    .modal.show {
+      display: block;
+    }
+    .modal button {
+      margin: 5px;
+      padding: 5px 10px;
+    }
+  </style>
+</head>
+<body>
+
+<h2>Service Actions</h2>
+<table id="service-table"></table>
+
+<!-- Confirmation Modal -->
+<div id="modal" class="modal">
+  <p id="modal-text"></p>
+  <button onclick="applyAction(true)">Confirm</button>
+  <button onclick="applyAction(false)">Cancel</button>
+</div>
+
+<script>
+  // Example service list
+  const services = ["Service A", "Service B", "Service C", "Service D"];
+
+  // Build table dynamically
+  const table = document.getElementById("service-table");
+  services.forEach(service => {
+    const row = document.createElement("tr");
+
+    const nameCell = document.createElement("td");
+    nameCell.textContent = service;
+
+    const actionCell = document.createElement("td");
+    const select = document.createElement("select");
+    select.innerHTML = `
+      <option value="" disabled selected>Action</option>
+      <option value="approved">Approved</option>
+      <option value="reject">Reject</option>
+    `;
+    select.onchange = () => confirmAction(select, service);
+
+    const status = document.createElement("span");
+    status.id = "status-" + service;
+    status.className = "status pending";
+    status.textContent = "Pending";
+
+    actionCell.appendChild(select);
+    actionCell.appendChild(status);
+
+    row.appendChild(nameCell);
+    row.appendChild(actionCell);
+    table.appendChild(row);
+  });
+
+  let pendingDropdown = null;
+  let pendingService = null;
+
+  function confirmAction(dropdown, serviceName) {
+    pendingDropdown = dropdown;
+    pendingService = serviceName;
+    document.getElementById('modal-text').textContent =
+      `Are you sure you want to set "${serviceName}" to "${dropdown.value}"?`;
+    document.getElementById('modal').classList.add('show');
+  }
+
+  function applyAction(confirm) {
+    document.getElementById('modal').classList.remove('show');
+    if (confirm && pendingDropdown) {
+      // Lock dropdown
+      pendingDropdown.disabled = true;
+
+      // Update status badge dynamically
+      const statusEl = document.getElementById('status-' + pendingService);
+      statusEl.textContent = pendingDropdown.value.charAt(0).toUpperCase() + pendingDropdown.value.slice(1);
+      statusEl.className = 'status ' + pendingDropdown.value;
+
+      // Simulate backend save
+      console.log(`Saved ${pendingService}: ${pendingDropdown.value}`);
+    } else {
+      // Reset dropdown if cancelled
+      pendingDropdown.value = "";
+    }
+    pendingDropdown = null;
+    pendingService = null;
+  }
+</script>
+
+</body>
+</html>
