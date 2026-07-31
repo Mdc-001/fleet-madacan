@@ -13,9 +13,12 @@
   "devDependencies": {
     "concurrently": "^9.1.2"
   },
-  "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start"
-  }
+ "scripts": {
+  "dev": "next dev",
+  "build": "next build",
+  "start": "next start",
+  "export": "next build && next export",
+  "predeploy": "npm run export",
+  "deploy": "gh-pages -d out"
+}
 }
