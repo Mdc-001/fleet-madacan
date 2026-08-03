@@ -10,19 +10,6 @@ import {
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { onAuthStateChanged } from 'firebase/auth';
 import { Timestamp } from 'firebase/firestore';
-function getUploadFolder(role) {
-  switch (role) {
-    case "Admin":
-      return "updated-proformas";
-    case "Verificator":
-      return "task-images";
-    case "SCM":
-      return "purchase-requests";
-    default:
-      return "misc";
-  }
-}
-
 
 export default function VehiclePage() {
   const { vehicleId } = useParams();
@@ -95,7 +82,6 @@ useEffect(() => {
     const tasks = taskSnap.docs.map(t => t.data());
     const allTasksDone = tasks.length > 0 && tasks.every(t => t.completed);
 
-
     let computedStatus;
 const hasPR = !!data.purchaseFileUrl;
 
@@ -140,12 +126,10 @@ else {
   status: computedStatus,
   approvalStatus,
   approvalNote: data.approvalNote || null,
-  verificationNote: data.verificationNote || null,
-  verifiedBy: data.verifiedBy || null,
-  verifiedAt: data.verifiedAt || null,
-  closedByAdmin: data.closedByAdmin || null   // ✅ include this
+  verificationNote: data.verificationNote || null,     // ✅ add this
+  verifiedBy: data.verifiedBy || null,                 // ✅ add this
+  verifiedAt: data.verifiedAt || null                  // ✅ add this
 };
-
 
 
   })
@@ -180,6 +164,8 @@ else {
   });
 };
 
+
+
   
   const markJobAsCompletedManually = async (jobId) => {
     try {
@@ -194,64 +180,46 @@ else {
     }
   };
   
-function getUploadFolder(role) {
-  switch (role) {
-    case "Admin":
-      return "updated-proformas";
-    case "Verificator":
-      return "task-images";
-    case "SCM":
-      return "purchase-requests";
-    default:
-      return "misc";
-  }
-}
-
 const handleCreateJob = async () => {
   if (!form.description || !form.mechanic) {
-    alert("Please fill in Description and Mechanic");
+    alert('Please fill in Description and Mechanic');
     return;
   }
 
+   // ✅ If transfer is checked, ensure a vehicle is selected
   if (form.transfer && !fromVehicleId) {
     alert("Please select a vehicle to demande parts");
     return;
   }
 
-  // ✅ Check authentication before upload
-  if (!auth.currentUser) {
-    alert("You must be signed in to upload files.");
-    return;
-  }
-
   try {
-    let purchaseFileUrl = "";
-    let purchaseFileName = "";
+    let purchaseFileUrl = '', purchaseFileName = '';
 
+    // ✅ Upload Purchase Request file if it exists
     if (form.purchaseFile) {
-      console.log("▶ Uploading file:", form.purchaseFile.name);
       try {
-        const fileRef = ref(storage, `purchase-requests/${Date.now()}_${form.purchaseFile.name}`);
-        const snapshot = await uploadBytes(fileRef, form.purchaseFile);
-        console.log("✅ Upload snapshot:", snapshot);
-
+        const fileRef = ref(
+          storage,
+          `purchase-requests/${Date.now()}_${form.purchaseFile.name}`
+        );
+        await uploadBytes(fileRef, form.purchaseFile);
         purchaseFileUrl = await getDownloadURL(fileRef);
         purchaseFileName = form.purchaseFile.name;
-        console.log("✅ File uploaded, URL:", purchaseFileUrl);
       } catch (fileErr) {
-        console.error("❌ Upload failed:", fileErr);
-        alert("Upload failed. See console for details.");
+        console.warn('⚠️ Failed to upload Purchase Request file:', fileErr);
+        // continue without blocking job creation
       }
     }
 
+    // ✅ Main job data
     const jobData = {
       mechanic: form.mechanic,
       description: form.description,
-      status: form.status || "In Progress",
-      priority: form.priority || "Medium",
-      requester: auth.currentUser?.email || "Unknown",
-      adminApprovalStatus: "Waiting",
-      finalApprovalStatus: "Waiting",
+      status: form.status,
+      priority: form.priority,
+      requester: auth.currentUser?.email || 'Unknown',
+      adminApprovalStatus: 'Waiting',
+      finalApprovalStatus: 'Waiting',
       urgentApproval: false,
       preApprovalLocked: false,
       finalApprovalLocked: false,
@@ -260,66 +228,87 @@ const handleCreateJob = async () => {
       createdAt: form.createdAt ? new Date(form.createdAt) : new Date(),
       purchaseFileUrl,
       purchaseFileName,
-      transfer: form.transfer || false,
+      transfer: form.transfer || false
     };
 
-    const jobRef = await addDoc(collection(db, "vehicles", vehicleId, "jobs"), jobData);
-    console.log("✅ Job created:", jobRef.id);
+    // ✅ Create the main job
+    const jobRef = await addDoc(
+      collection(db, 'vehicles', vehicleId, 'jobs'),
+      jobData
+    );
+    const jobId = jobRef.id;
 
-    alert("✅ Job created successfully.");
+    // ✅ If transfer, create mirrored job in fromVehicleId
+    if (form.transfer && fromVehicleId) {
+      const requestingVehicleSnap = await getDoc(doc(db, 'vehicles', vehicleId));
+      const requestingVehicle = requestingVehicleSnap.exists()
+        ? requestingVehicleSnap.data()
+        : {};
+
+      const requestingVehicleLabel = `${requestingVehicle.type || 'Vehicle'} - ${
+        requestingVehicle.plate || vehicleId
+      }`;
+
+      const mirroredJobRef = await addDoc(
+        collection(db, 'vehicles', fromVehicleId, 'jobs'),
+        {
+          description: `Part transferred to vehicle ${requestingVehicleLabel}`,
+          mechanic: jobData.mechanic,
+          priority: jobData.priority,
+          status: jobData.status,
+          purchaseRequestNumber: jobData.purchaseRequestNumber || '',
+          purchaseFileUrl: jobData.purchaseFileUrl || '',
+          purchaseFileName: jobData.purchaseFileName || '',
+          createdAt: new Date(),
+          transfer: true,
+          transferMirror: true,
+          toVehicleId: vehicleId,
+          mirrorOfJobId: jobId
+        }
+      );
+
+      await updateDoc(jobRef, { linkedJobId: mirroredJobRef.id });
+      console.log('✅ Mirrored job created and linked:', mirroredJobRef.id);
+    }
+
+    // ✅ Reset form
     setForm({
-      mechanic: "",
-      description: "",
-      status: "In Progress",
-      priority: "Medium",
-      purchaseRequestNumber: "",
+      mechanic: '',
+      description: '',
+      status: 'In Progress',
+      priority: 'Medium',
+      purchaseRequestNumber: '',
       purchaseFile: null,
-      mileage: "",
-      createdAt: "",
-      transfer: false,
+      mileage: '',
+      createdAt: '',
+      transfer: false
     });
+
   } catch (err) {
-    console.error("❌ Error creating job:", err);
-    alert("Error creating job. See console for details.");
+    console.error('❌ Error creating job:', err);
+    alert('Error creating job. See console for details.');
   }
 };
 
 
 
-function getUploadFolder(role) {
-  switch (role) {
-    case "Admin":
-      return "updated-proformas";
-    case "Verificator":
-      return "task-images";
-    case "SCM":
-      return "purchase-requests";
-    default:
-      return "misc";
-  }
-}
-
-const handleUpdateProforma = async (jobId, file) => {
+  const handleUpdateProforma = async (jobId, file) => {
   if (!file) {
     alert("Please select a file to upload.");
     return;
   }
 
   try {
-    // Decide folder based on role
-    const folderName = getUploadFolder(role);
-
     // Upload to Firebase Storage
-    const fileRef = ref(storage, `${folderName}/${Date.now()}_${file.name}`);
+    const fileRef = ref(storage, `updated-proformas/${Date.now()}_${file.name}`);
     await uploadBytes(fileRef, file);
     const downloadURL = await getDownloadURL(fileRef);
 
     // Update ONLY the updatedProforma fields in Firestore
-    const jobRef = doc(db, "vehicles", vehicleId, "jobs", jobId);
+    const jobRef = doc(db, 'vehicles', vehicleId, 'jobs', jobId);
     await updateDoc(jobRef, {
       updatedProformaUrl: downloadURL,
-      updatedProformaFileName: file.name,
-      updatedProformaFolder: folderName // optional: track folder used
+      updatedProformaFileName: file.name
     });
 
     alert("✅ Updated Proforma uploaded successfully.");
@@ -331,22 +320,10 @@ const handleUpdateProforma = async (jobId, file) => {
   }
 };
 
-function getUploadFolder(role) {
-  switch (role) {
-    case "Admin":
-      return "updated-proformas";
-    case "Verificator":
-      return "task-images";
-    case "SCM":
-      return "purchase-requests";
-    default:
-      return "misc";
-  }
-}
 
-const handleSaveEdit = async (jobId) => {
+  const handleSaveEdit = async (jobId) => {
   try {
-    const jobRef = doc(db, "vehicles", vehicleId, "jobs", jobId);
+    const jobRef = doc(db, 'vehicles', vehicleId, 'jobs', jobId);
     const jobSnap = await getDoc(jobRef);
 
     if (!jobSnap.exists()) {
@@ -354,82 +331,34 @@ const handleSaveEdit = async (jobId) => {
     }
 
     const updatedData = {
-      mechanic: editForm.mechanic || "",
-      description: editForm.description || "",
-      priority: editForm.priority || "Medium",
-      status: editForm.status || "In Progress",
-      mileage: editForm.mileage || "",
-      purchaseRequestNumber: editForm.purchaseRequestNumber || "",
-      createdAt: editForm.createdAt ? new Date(editForm.createdAt) : new Date(),
-      transfer: editForm.transfer || false
-    };
+  mechanic: editForm.mechanic || '',
+  description: editForm.description || '',
+  priority: editForm.priority || 'Medium',
+  status: editForm.status || 'In Progress',
+  mileage: editForm.mileage || '',
+  purchaseRequestNumber: editForm.purchaseRequestNumber || '',
+  createdAt: editForm.createdAt ? new Date(editForm.createdAt) : new Date(),
+  transfer: editForm.transfer || false   // ✅ include transfer when saving
+};
+
 
     if (editForm.purchaseFile) {
-      // Decide folder based on role
-      const folderName = getUploadFolder(role);
+  const fileRef = ref(storage, `purchase-requests/${Date.now()}_${editForm.purchaseFile.name}`);
+  await uploadBytes(fileRef, editForm.purchaseFile);
+  const downloadURL = await getDownloadURL(fileRef);
+  updatedData.purchaseFileUrl = downloadURL;
+  updatedData.purchaseFileName = editForm.purchaseFile.name;
+}
 
-      // Upload to Firebase Storage
-      const fileRef = ref(storage, `${folderName}/${Date.now()}_${editForm.purchaseFile.name}`);
-      await uploadBytes(fileRef, editForm.purchaseFile);
-      const downloadURL = await getDownloadURL(fileRef);
 
-      // Add file metadata to updatedData
-      updatedData.purchaseFileUrl = downloadURL;
-      updatedData.purchaseFileName = editForm.purchaseFile.name;
-      updatedData.purchaseFileFolder = folderName; // optional: track folder used
-    }
 
     await updateDoc(jobRef, updatedData);
     setEditId(null);
   } catch (err) {
-    console.error("❌ Error in handleSaveEdit:", err.message, err);
-    alert("Failed to save job edits.");
+    console.error('❌ Error in handleSaveEdit:', err.message, err);
+    alert('Failed to save job edits.');
   }
 };
-
-const confirmAndMarkComplete = (jobId) => {
-  if (window.confirm("Are you sure you want to mark this job as Completed?")) {
-    markJobAsComplete(jobId);
-  }
-};
-
-const confirmAndMarkRegular = (jobId) => {
-  if (window.confirm("Are you sure you want to mark this job as Completed as Regular?")) {
-    markJobAsRegular(jobId);
-  }
-};
-
-
-const markJobAsComplete = async (jobId) => {
-  try {
-    await updateDoc(doc(db, 'vehicles', vehicleId, 'jobs', jobId), {
-      status: 'Completed',
-      adminApprovalStatus: 'Approved',
-      finalApprovalStatus: 'Approved',
-      completedAt: Timestamp.now(),
-      closedByAdmin: 'Completed' // custom flag
-    });
-    console.log(`✅ Job ${jobId} marked as Completed by Admin`);
-  } catch (error) {
-    console.error('❌ Error marking job as Completed:', error);
-  }
-};
-
-const markJobAsRegular = async (jobId) => {
-  try {
-    await updateDoc(doc(db, 'vehicles', vehicleId, 'jobs', jobId), {
-      status: 'Completed', // ✅ also mark as completed
-      adminApprovalStatus: 'Approved',
-      finalApprovalStatus: 'Approved',
-      completedAt: Timestamp.now(),
-      closedByAdmin: 'Regular' // custom flag
-    });
-    console.log(`✅ Job ${jobId} marked as Completed as Regular`);
-  } catch (error) {
-    console.error('❌ Error marking job as Regular:', error);
-  }
-};
-
 
 
 const handleSaveApprovalNote = async (jobId) => {
@@ -522,10 +451,6 @@ const handleDeletePR = async (jobId, fileUrl) => {
     alert("An unexpected error occurred while deleting the job.");
   }
 };
-
-
-
-
 
   const updateApprovalField = async (jobId, field, value) => {
   const updatePayload = { [field]: value };
@@ -865,27 +790,13 @@ const handleDeletePR = async (jobId, fileUrl) => {
 
 .................................................................................
   {/* Add your approval section + buttons here */}
- <div style={{ marginTop: '10px' }}>
-  <strong>Pre-approval:</strong> {job.adminApprovalStatus}<br />
-  <strong>Final Approval:</strong> {job.finalApprovalStatus}<br />
-
-  {job.closedByAdmin === 'Regular' && (
-    <span className="badge badge-regular">
-      Job completed as Regular on {job.completedAt?.toDate().toLocaleDateString()}
-    </span>
-  )}
-
-  {job.closedByAdmin === 'Completed' && (
-    <span className="badge badge-complete">
-      Marked Completed by Pre-approval on {job.completedAt?.toDate().toLocaleDateString()}
-    </span>
-  )}
+  <div style={{ marginTop: '10px' }}>
+    {/* For example: */}
+    <strong>Pre-approval:</strong> {job.adminApprovalStatus}<br />
+    <strong>Final Approval:</strong> {job.finalApprovalStatus}<br />
+    {/* Add Edit/Delete/Open buttons as you already have */}
+  </div>
 </div>
-
-
-
-</div>
-
 
 
   {/* :::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::: */}
@@ -1182,48 +1093,34 @@ const handleDeletePR = async (jobId, fileUrl) => {
 
    {/* Admin unlock dropdown */}
 <div style={{ marginTop: '10px' }}>
-  <label>Manage Options: </label>
+  <label>Edit Approval: </label>
   <select
-  onChange={async (e) => {
-    const action = e.target.value;
-    if (!action) return;
+    onChange={async (e) => {
+      const action = e.target.value;
+      if (!action) return;
 
-    const updates = {};
+      const updates = {};
 
-    if (action === 'unlockPre') {
-      updates.preApprovalLocked = false;
-      updates.finalApprovalStatus = 'Waiting';
-    }
-
-    if (action === 'unlockFinal') {
-      updates.finalApprovalLocked = false;
-      updates.finalApprovalStatus = 'Waiting';
-      updates.approvedBy = null;
-      updates.approvedAt = null;
-    }
-
-    if (action === 'markComplete') {
-      if (window.confirm("Are you sure you want to mark this job as Completed?")) {
-        updates.status = 'Completed';
-        updates.adminApprovalStatus = 'Approved';
-        updates.finalApprovalStatus = 'Approved';
-        updates.completedAt = Timestamp.now();
-        updates.closedByAdmin = 'Completed';
+      if (action === 'unlockPre') {
+        updates.preApprovalLocked = false;
+        updates.finalApprovalStatus = 'Waiting'; // ✅ Reset to Waiting
       }
-    }
 
-    if (action === 'markRegular') {
-      if (window.confirm("Are you sure you want to mark this job as Completed as Regular?")) {
-        updates.status = 'Completed'; // ✅ also mark as completed
-        updates.adminApprovalStatus = 'Approved';
-        updates.finalApprovalStatus = 'Approved';
-        updates.completedAt = Timestamp.now();
-        updates.closedByAdmin = 'Regular';
+      if (action === 'unlockFinal') {
+        updates.finalApprovalLocked = false;
+        updates.finalApprovalStatus = 'Waiting'; // ✅ Reset to Waiting
+        updates.approvedBy = null;
+        updates.approvedAt = null;
       }
-    }
 
-    // Update main job
-    if (Object.keys(updates).length > 0) {
+      if (action === 'unlockRegular') {
+        updates.finalApprovalLocked = false;
+        updates.finalApprovalStatus = 'Approved as Regular'; // ✅ Restore Regular Approval
+        updates.approvedBy = null;
+        updates.approvedAt = null;
+      }
+
+      // Update main job
       await updateDoc(doc(db, 'vehicles', vehicleId, 'jobs', job.id), updates);
 
       // 🔁 Mirror sync
@@ -1231,18 +1128,14 @@ const handleDeletePR = async (jobId, fileUrl) => {
         const mirrorRef = doc(db, 'vehicles', job.fromVehicleId, 'jobs', job.mirrorJobId);
         await updateDoc(mirrorRef, updates);
       }
-    }
 
-    e.target.value = ''; // reset dropdown
-  }}
->
-  <option value="">-- Manage Options --</option>
-  <option value="unlockPre">Unlock Pre-approval</option>
-  <option value="unlockFinal">Unlock Final Approval</option>
-  <option value="markComplete">Mark as Complete</option>
-  <option value="markRegular">Mark as Regular</option>
-</select>
-
+      e.target.value = ''; // reset dropdown
+    }}
+  >
+    <option value="">-- Edit Approval --</option>
+    <option value="unlockPre">Unlock Pre-approval</option>
+    <option value="unlockFinal">Unlock Final Approval </option>
+  </select>
 </div>
   </>
 )}
@@ -1624,7 +1517,6 @@ const handleDeletePR = async (jobId, fileUrl) => {
 )}
 
 
-
         {role === 'Admin' && editId !== job.id && (
           <>
             <button style={{ marginTop: '10px' }} onClick={() => handleStartEdit(job)}>✏️ Edit</button>
@@ -1643,4 +1535,3 @@ const handleDeletePR = async (jobId, fileUrl) => {
     </div>
   );
 }
-

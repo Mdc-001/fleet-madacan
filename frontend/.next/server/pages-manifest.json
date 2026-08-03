@@ -1,0 +1,20 @@
+{
+  "/_error": "pages/_error.js",
+  "/_app": "pages/_app.js",
+  "/DashboardAnalytics": "pages/DashboardAnalytics.js",
+  "/ApprovalDashboard": "pages/ApprovalDashboard.js",
+  "/AdminDashboard": "pages/AdminDashboard.js",
+  "/CustomerServiceTracking": "pages/CustomerServiceTracking.js",
+  "/HomePage": "pages/HomePage.js",
+  "/MaintenanceFollowUp": "pages/MaintenanceFollowUp.js",
+  "/LoginPage": "pages/LoginPage.js",
+  "/JobDetailPage": "pages/JobDetailPage.js",
+  "/SyncJobs": "pages/SyncJobs.js",
+  "/SCMDashboard": "pages/SCMDashboard.js",
+  "/UserDashboard": "pages/UserDashboard.js",
+  "/TechnicianView": "pages/TechnicianView.js",
+  "/VerificatorDashboard": "pages/VerificatorDashboard.js",
+  "/VehiclePage": "pages/VehiclePage.js",
+  "/WarehouseDashboard": "pages/WarehouseDashboard.js",
+  "/_document": "pages/_document.js"
+}
