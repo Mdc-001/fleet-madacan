@@ -1,4 +1,7 @@
 {
+  "name": "fleet-mvp-backend",
+  "version": "1.0.0",
+  "private": true,
   "dependencies": {
     "cors": "^2.8.5",
     "express": "^5.1.0",
@@ -6,5 +9,12 @@
   },
   "devDependencies": {
     "concurrently": "^9.1.2"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "server": "nodemon functions/index.js",
+    "client": "npm start --prefix frontend",
+    "build": "npm run build --prefix frontend"
   }
 }
