@@ -19,20 +19,20 @@ export default async function handler(req, res) {
   try {
     const transporter = nodemailer.createTransport({
       host: "mail.madacan.com",
-      port: 587,              // TLS port
-      secure: false,          // false for TLS (true only if using port 465/SSL)
+      port: 587,
+      secure: false,
       auth: {
-        user: process.env.EMAIL_USER, // applications
-        pass: process.env.EMAIL_PASS, // #17112025+App
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
       },
       tls: {
         minVersion: "TLSv1.2",
-        rejectUnauthorized: false
-      }
+        rejectUnauthorized: false,
+      },
     });
 
     await transporter.sendMail({
-      from: `"Fleet App" <noreply@madacan.com>`, // ✅ valid sender address
+      from: `"Fleet App" <noreply@madacan.com>`,
       to,
       cc,
       subject,
