@@ -44,6 +44,5 @@ export default async function handler(req, res) {
     console.error("❌ Nodemailer error:", error);
     return res.status(500).json({ success: false, error: error.message });
   }
+  
 }
-
-// ✅ Test deployement
