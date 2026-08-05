@@ -5,6 +5,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ success: false, error: "Method not allowed" });
   }
 
+  // Token validation
   const authHeader = req.headers.authorization || "";
   const token = authHeader.replace("Bearer ", "");
   if (token !== process.env.API_SECRET) {
@@ -18,31 +19,30 @@ export default async function handler(req, res) {
 
   try {
     const transporter = nodemailer.createTransport({
-      host: "mail.madacan.com",
-      port: 587,              // TLS port
-      secure: false,          // false for TLS (true only if using port 465/SSL)
+      host: process.env.SMTP_HOST,   // e.g. "mail.madacan.com" or "smtp.gmail.com"
+      port: 587,                     // TLS port
+      secure: false,                 // true only for port 465
       auth: {
-        user: process.env.EMAIL_USER, // applications
-        pass: process.env.EMAIL_PASS, // #17112025+App
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
       },
       tls: {
-        minVersion: "TLSv1.2",
-        rejectUnauthorized: false
+        minVersion: "TLSv1.2",       // enforce strong TLS
+        rejectUnauthorized: true     // don’t accept weak certs
       }
     });
 
     await transporter.sendMail({
-      from: `"Fleet App" <noreply@madacan.com>`, // ✅ valid sender address
+      from: `"Fleet App" <${process.env.EMAIL_USER}>`,
       to,
       cc,
       subject,
       text,
     });
 
-    return res.status(200).json({ success: true });
+    return res.status(200).json({ success: true, message: "Email sent successfully" });
   } catch (error) {
     console.error("❌ Nodemailer error:", error);
     return res.status(500).json({ success: false, error: error.message });
   }
-  
 }
