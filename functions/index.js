@@ -33,7 +33,7 @@ const formatPurchaseInfo = (url, name) => {
 
 // 🔄 Retry wrapper for fetch
 const sendWithRetry = async (mailOptions, maxRetries = 3) => {
-  const endpoint = "https://project-ja0r1.vercel.app/api/sendEmail"; // ✅ fixed
+  const endpoint = "https://fleet-api-sigma.vercel.app/api/sendEmail"; // ✅ use your Vercel project
   let attempt = 0;
   while (attempt < maxRetries) {
     try {
@@ -64,6 +64,7 @@ const sendWithRetry = async (mailOptions, maxRetries = 3) => {
   });
   return false;
 };
+
 
 // ✅ Job Creation Email
 exports.sendJobCreatedEmail = onDocumentCreated({
