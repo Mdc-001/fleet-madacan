@@ -14,6 +14,7 @@ import VerificatorDashboard from './pages/VerificatorDashboard';
 import WarehouseDashboard from './pages/WarehouseDashboard';
 import MaintenanceFollowUp from './pages/MaintenanceFollowUp';
 import SCMDashboard from './pages/SCMDashboard';
+import CustomerServiceTracking from './pages/CustomerServiceTracking';
 
 function App() {
   return (
@@ -64,6 +65,10 @@ function App() {
       <Route
         path="/scm"
         element={<ProtectedRoute allowedRoles={['Scm']}><SCMDashboard /></ProtectedRoute>}
+      />
+      <Route
+        path="/customer-service"
+        element={<ProtectedRoute allowedRoles={['Admin', 'User', 'Scm']}><CustomerServiceTracking /></ProtectedRoute>}
       />
     </Routes>
   );

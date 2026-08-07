@@ -131,6 +131,13 @@ export default function SCMDashboard() {
           🛢 Mileage & Lubrification Tracking
         </button>
 
+        <button
+          onClick={() => navigate('/customer-service')}
+          style={{ backgroundColor: '#0077cc', color: 'white', padding: '8px 16px', border: 'none', borderRadius: '6px', marginLeft: '8px', cursor: 'pointer', fontWeight: 'bold' }}
+        >
+          🛞 Customer Service Tracking
+        </button>
+
         <div style={{ marginTop: '20px', padding: '16px', border: '1px solid #ddd', borderRadius: '12px', background: '#ffffff', boxShadow: '0 2px 6px rgba(0, 0, 0, 0.05)' }}>
           <div style={{ fontWeight: 'bold', fontSize: '16px', marginBottom: '12px', color: '#333' }}>
             🚗 Total Vehicles: {vehicles.length}

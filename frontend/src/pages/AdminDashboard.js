@@ -354,6 +354,22 @@ const handleInputChange = (field, value) => {
         >
           🛢 Mileage & Lubrification Tracking
         </button>
+
+        <button
+          onClick={() => navigate('/customer-service')}
+          style={{
+            backgroundColor: '#0077cc',
+            color: 'white',
+            padding: '8px 16px',
+            border: 'none',
+            borderRadius: '6px',
+            marginLeft: '8px',
+            cursor: 'pointer',
+            fontWeight: 'bold'
+          }}
+        >
+          🛞 Customer Service Tracking
+        </button>
       </div>
 
       {/* ➕ Add Vehicle Form */}

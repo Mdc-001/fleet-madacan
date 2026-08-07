@@ -755,6 +755,9 @@ exports.sendTireServiceCreatedEmail = onDocumentCreated({
   const requestData = event.data.data();
   const { requestId } = event.params;
 
+  // Only send tire service email for tire entries (skip assurance and other service types)
+  if (requestData.serviceType !== 'tire') return;
+
   // Load recipients from Firestore
   const recipientsSnap = await admin.firestore().doc('emailRecipients/customerService').get();
   if (!recipientsSnap.exists) {
