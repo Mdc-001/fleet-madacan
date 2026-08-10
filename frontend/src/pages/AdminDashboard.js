@@ -572,6 +572,7 @@ const handleInputChange = (field, value) => {
                 >
                   <option value="">Select Area</option>
                   <option value="TNR">TNR</option>
+                  <option value="FTU">FTU</option>
                   <option value="Toamasina">Toamasina</option>
                   <option value="Moramanga">Moramanga</option>
                 </select>
