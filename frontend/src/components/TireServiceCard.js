@@ -15,6 +15,7 @@ export default function TireServiceCard({ role }) {
   const [editForm, setEditForm] = useState({});
   const [groupingEntry, setGroupingEntry] = useState(null);
   const [newBatchId, setNewBatchId] = useState('');
+  const [showApproveAction, setShowApproveAction] = useState(false);
 
   // Flash animation style
   useEffect(() => {
@@ -28,6 +29,14 @@ export default function TireServiceCard({ role }) {
     const styleTag = document.createElement('style');
     styleTag.innerHTML = flashStyle;
     document.head.appendChild(styleTag);
+  }, []);
+
+  // Toggle between badge and button for Approval role
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setShowApproveAction(prev => !prev);
+    }, 2000);
+    return () => clearInterval(interval);
   }, []);
 
   const fetchEntries = async () => {
@@ -87,6 +96,38 @@ export default function TireServiceCard({ role }) {
     }
   };
 
+  // SCM triggers final approval for a whole batch
+  const handleAskFinalApproval = async (batchId) => {
+    try {
+      for (const entry of groupedEntries[batchId]) {
+        await updateDoc(doc(db, 'customerServiceTracking', entry.id), {
+          status: "WaitingFinalApproval"
+        });
+      }
+      fetchEntries();
+      alert(`Batch ${batchId} is now waiting for Final Approval.`);
+    } catch (err) {
+      console.error("Final approval request failed:", err);
+    }
+  };
+
+  // Approval role finalizes batch
+  const handleFinalApproval = async (batchId, approved) => {
+    try {
+      for (const entry of groupedEntries[batchId]) {
+        await updateDoc(doc(db, 'customerServiceTracking', entry.id), {
+          status: approved ? "Finished" : "Rejected",
+          finalApproval: approved,
+          closedDate: new Date()
+        });
+      }
+      fetchEntries();
+      alert(`Batch ${batchId} has been ${approved ? "Final Approved" : "Rejected"}.`);
+    } catch (err) {
+      console.error("Final approval failed:", err);
+    }
+  };
+
   const groupedEntries = entries.reduce((groups, entry) => {
     const batchId = entry.billingBatchId || 'UNASSIGNED';
     if (!groups[batchId]) groups[batchId] = [];
@@ -117,8 +158,8 @@ export default function TireServiceCard({ role }) {
         </button>
       </div>
 
-      {mode === 'single' && <TireSingleRequest onSaved={fetchEntries} />}
-      {mode === 'group' && <TireGroupedRequest onSaved={fetchEntries} />}
+      {mode === 'single' && <TireSingleRequest onSaved={fetchEntries} role={role} />}
+      {mode === 'group' && <TireGroupedRequest onSaved={fetchEntries} role={role} />}
 
       {/* Grouped list */}
       <h4 style={{ marginTop: '30px', marginBottom: '16px', color: '#444' }}>📋 Tire Requests Grouped by Billing ID</h4>
@@ -127,6 +168,12 @@ export default function TireServiceCard({ role }) {
         const pendingCount = groupedEntries[batchId].filter(
           e => e.scmApproval?.toLowerCase() === 'pending'
         ).length;
+        const allScmApproved = groupedEntries[batchId].every(
+          e => e.scmApproval?.toLowerCase() === 'approved'
+        );
+        const batchWaitingFinalApproval = groupedEntries[batchId].every(
+          e => e.status === 'WaitingFinalApproval'
+        );
 
         return (
           <div key={batchId} style={{ marginBottom: '20px' }}>
@@ -148,27 +195,95 @@ export default function TireServiceCard({ role }) {
                 {isExpanded ? '▼' : '▶'} Billing Batch: {batchId} ({groupedEntries[batchId].length} services)
               </span>
 
-              {pendingCount > 0 && (
-                <span
-                  style={{
-                    backgroundColor: '#ffcccc',
-                    color: '#b71c1c',
-                    padding: '4px 200px',
-                    borderRadius: '12px',
-                    fontWeight: 'bold',
-                    animation: 'flash 1s infinite'
-                  }}
-                >
-                  ⏳ {pendingCount} waiting approval
-                </span>
-              )}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                {pendingCount > 0 && (
+                  <span
+                    style={{
+                      backgroundColor: '#ffcccc',
+                      color: '#b71c1c',
+                      padding: '3px 50px',
+                      borderRadius: '12px',
+                      fontWeight: 'bold',
+                      animation: 'flash 1s infinite'
+                    }}
+                  >
+                    ⏳ {pendingCount} waiting SCM approval
+                  </span>
+                )}
+
+                {/* SCM-only Ask for Final Approval button */}
+                                {role?.toLowerCase() === "scm" && allScmApproved && !batchWaitingFinalApproval && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleAskFinalApproval(batchId);
+                    }}
+                    style={{
+                      background: '#ff9800',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '6px',
+                      padding: '6px 12px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Ask for Final Approval
+                  </button>
+                )}
+
+                {/* Once escalated, show alternating badge/button for Approval role */}
+                {batchWaitingFinalApproval && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    {showApproveAction && role?.toLowerCase() === "approval" ? (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleFinalApproval(batchId, true);
+                        }}
+                        style={{
+                          background: '#4caf50',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '6px',
+                          padding: '6px 12px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        ✅ Click here to Final Approve
+                      </button>
+                    ) : (
+                      <span
+                        style={{
+                          backgroundColor: '#fff3cd',
+                          color: '#856404',
+                          padding: '3px 50px',
+                          borderRadius: '12px',
+                          fontWeight: 'bold',
+                          animation: 'flash 1s infinite'
+                        }}
+                      >
+                        ⏳ Waiting Final Approval
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
 
             {isExpanded && (
               <div style={{ padding: '12px', marginTop: '8px', backgroundColor: '#fcfcfc', borderRadius: '8px' }}>
                 <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
                   {groupedEntries[batchId].map(entry => (
-                    <li key={entry.id} style={{ border: '1px solid #eee', borderRadius: '8px', padding: '12px', marginBottom: '10px', backgroundColor: '#fff' }}>
+                    <li
+                      key={entry.id}
+                      style={{
+                        border: '1px solid #eee',
+                        borderRadius: '8px',
+                        padding: '12px',
+                        marginBottom: '10px',
+                        backgroundColor: '#fff'
+                      }}
+                    >
                       <strong>Plate:</strong> {entry.plate || 'N/A'} <br />
                       <strong>Driver:</strong> {entry.driverName || 'N/A'} <br />
                       <strong>Service Provider:</strong> {entry.serviceProvider || 'N/A'} <br />
@@ -187,6 +302,23 @@ export default function TireServiceCard({ role }) {
                       >
                         ✔ {entry.scmApproval || 'N/A'}
                       </span>
+                      <br />
+                      <strong>Status:</strong>{' '}
+                      <span
+                        style={{
+                          fontWeight: '500',
+                          color:
+                            entry.status === 'Finished'
+                              ? '#4caf50'
+                              : entry.status === 'Rejected'
+                              ? '#f44336'
+                              : entry.status === 'WaitingFinalApproval'
+                              ? '#ff9800'
+                              : '#999'
+                        }}
+                      >
+                        {entry.status || 'N/A'}
+                      </span>
 
                       {/* Action dropdowns row */}
                       <ServiceDropdowns
@@ -195,6 +327,7 @@ export default function TireServiceCard({ role }) {
                         dropdownStyle={dropdownStyle}
                         handleUpdateStatus={handleUpdateStatus}
                         handleManageAction={handleManageAction}
+                        fetchEntries={fetchEntries}
                       />
                     </li>
                   ))}
@@ -205,7 +338,7 @@ export default function TireServiceCard({ role }) {
         );
       })}
 
-           {/* Modals */}
+      {/* Modals */}
       <EditServiceModal
         editingEntry={editingEntry}
         editForm={editForm}

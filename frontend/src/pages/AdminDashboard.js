@@ -51,6 +51,7 @@ export default function AdminDashboard() {
 
   const areaOptions = [
     { value: 'TNR', label: 'TNR' },
+    { value: 'FTU', label: 'FTU' },
     { value: 'Toamasina', label: 'Toamasina' },
     { value: 'Moramanga', label: 'Moramanga' }
   ];

@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { db } from '../firebase';
-import { collection, addDoc, Timestamp } from 'firebase/firestore';
+import { collection, addDoc, Timestamp, updateDoc, doc } from 'firebase/firestore';
 
-export default function TireSingleRequest({ onSaved }) {
+export default function TireSingleRequest({ onSaved, role }) {
   const [form, setForm] = useState({
     plate: '',
     driverName: '',
@@ -10,6 +10,7 @@ export default function TireSingleRequest({ onSaved }) {
     serviceProvider: '',
     status: 'pending',
     scmApproval: 'pending',
+    finalApproval: false,
     closedDate: null,
     serviceType: 'tire',
   });
@@ -35,10 +36,26 @@ export default function TireSingleRequest({ onSaved }) {
       serviceProvider: '',
       status: 'pending',
       scmApproval: 'pending',
+      finalApproval: false,
       closedDate: null,
       serviceType: 'tire',
     });
     onSaved();
+  };
+
+  // Final Approver approves/rejects single request
+  const handleFinalApproval = async (approved, entryId) => {
+    try {
+      await updateDoc(doc(db, 'customerServiceTracking', entryId), {
+        status: approved ? 'Finished' : 'Rejected',
+        finalApproval: approved,
+        closedDate: Timestamp.now()
+      });
+      alert(`Request marked as ${approved ? 'Finished' : 'Rejected'}`);
+      onSaved();
+    } catch (err) {
+      console.error('Final approval failed:', err);
+    }
   };
 
   const inputStyle = {
@@ -57,6 +74,7 @@ export default function TireSingleRequest({ onSaved }) {
     cursor: 'pointer',
     transition: 'background-color 0.2s ease',
     marginTop: '10px',
+    marginRight: '8px',
   };
 
   return (
@@ -67,6 +85,13 @@ export default function TireSingleRequest({ onSaved }) {
       <input style={inputStyle} type="date" value={form.repairDate} onChange={(e) => handleChange('repairDate', e.target.value)} />
       <input style={inputStyle} placeholder="Service Provider" value={form.serviceProvider} onChange={(e) => handleChange('serviceProvider', e.target.value)} />
       <button onClick={handleSave} style={{ ...buttonStyle, backgroundColor: '#0077cc', color: 'white' }}>💾 Save</button>
+
+      {role === 'FinalApprover' && (
+        <div style={{ marginTop: '16px' }}>
+          <button onClick={() => handleFinalApproval(true, form.id)} style={{ ...buttonStyle, backgroundColor: '#4caf50', color: 'white' }}>✅ Approve</button>
+          <button onClick={() => handleFinalApproval(false, form.id)} style={{ ...buttonStyle, backgroundColor: '#f44336', color: 'white' }}>❌ Reject</button>
+        </div>
+      )}
     </div>
   );
 }

@@ -49,7 +49,7 @@ const ProtectedRoute = ({ children, allowedRoles }) => {
     return <div>Access denied</div>;
   }
 
-  // Pass role down to children
+  // Pass normalized role down to children
   return React.cloneElement(children, { role });
 };
 

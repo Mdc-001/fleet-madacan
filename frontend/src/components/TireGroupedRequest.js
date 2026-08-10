@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { db } from '../firebase';
-import { collection, addDoc, Timestamp } from 'firebase/firestore';
+import { collection, addDoc, Timestamp, updateDoc, doc, getDocs, query, where } from 'firebase/firestore';
 
-export default function TireGroupedRequest({ onSaved }) {
+export default function TireGroupedRequest({ onSaved, role }) {
   const [batchId, setBatchId] = useState('');
   const [form, setForm] = useState({ plate: '', driverName: '', repairDate: '', serviceProvider: '' });
   const [groupRequests, setGroupRequests] = useState([]);
@@ -29,6 +29,7 @@ export default function TireGroupedRequest({ onSaved }) {
         billingBatchId: batchId,
         status: 'pending',
         scmApproval: 'pending',
+        finalApproval: false,
         closedDate: null,
         serviceType: 'tire',
         repairDate: Timestamp.fromDate(new Date(req.repairDate)),
@@ -39,6 +40,26 @@ export default function TireGroupedRequest({ onSaved }) {
     setGroupRequests([]);
     setBatchId('');
     onSaved();
+  };
+
+  // Final Approver approves/rejects the whole batch
+  const handleFinalApproval = async (approved) => {
+    if (!batchId) return alert('Batch ID required.');
+    try {
+      const q = query(collection(db, 'customerServiceTracking'), where('billingBatchId', '==', batchId));
+      const snap = await getDocs(q);
+      for (const d of snap.docs) {
+        await updateDoc(doc(db, 'customerServiceTracking', d.id), {
+          status: approved ? 'Finished' : 'Rejected',
+          finalApproval: approved,
+          closedDate: Timestamp.now()
+        });
+      }
+      alert(`Batch ${batchId} marked as ${approved ? 'Finished' : 'Rejected'}`);
+      onSaved();
+    } catch (err) {
+      console.error('Final approval failed:', err);
+    }
   };
 
   const inputStyle = {
@@ -72,6 +93,14 @@ export default function TireGroupedRequest({ onSaved }) {
         <button onClick={addToGroup} style={{ ...buttonStyle, backgroundColor: '#2196f3', color: 'white' }}>➕ Add to Group</button>
         <button onClick={saveGroup} style={{ ...buttonStyle, backgroundColor: '#4caf50', color: 'white' }}>💾 Save Group</button>
       </div>
+
+      {role === 'FinalApprover' && batchId && (
+        <div style={{ marginTop: '16px' }}>
+          <button onClick={() => handleFinalApproval(true)} style={{ ...buttonStyle, backgroundColor: '#4caf50', color: 'white' }}>✅ Approve Batch</button>
+          <button onClick={() => handleFinalApproval(false)} style={{ ...buttonStyle, backgroundColor: '#f44336', color: 'white' }}>❌ Reject Batch</button>
+        </div>
+      )}
+
       {groupRequests.length > 0 && (
         <div style={{ marginTop: '16px' }}>
           <h5 style={{ color: '#333' }}>📝 Pending Group Requests (Batch: {batchId || 'N/A'})</h5>
