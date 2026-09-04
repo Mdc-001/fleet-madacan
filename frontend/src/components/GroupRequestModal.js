@@ -1,20 +1,34 @@
-import React from 'react';
-import { updateDoc, doc } from 'firebase/firestore';
+import React, { useEffect, useState } from 'react';
 import { db } from '../firebase';
+import { collection, getDocs } from 'firebase/firestore';
 
 export default function GroupRequestModal({
   groupingEntry,
-  groupedEntries,
   newBatchId,
   setNewBatchId,
   setGroupingEntry,
   handleAssignToBatch,
   dropdownStyle
 }) {
+  const [batchOptions, setBatchOptions] = useState([]);
+
+  useEffect(() => {
+    const fetchBatches = async () => {
+      const snap = await getDocs(collection(db, 'customerServiceTracking'));
+      const openBatches = snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .filter(b => b.status !== 'Finished' && b.status !== 'complete'); // only open batches
+      setBatchOptions(openBatches);
+    };
+    fetchBatches();
+  }, []);
+
   if (!groupingEntry) return null;
 
   const handleAssign = () => {
-    handleAssignToBatch(groupingEntry, newBatchId);
+    if (!newBatchId) return;
+    // 🔧 Pass batchId + requestId + newBatchId to parent handler
+    handleAssignToBatch(groupingEntry.batchId, groupingEntry.id, newBatchId);
   };
 
   return (
@@ -43,8 +57,10 @@ export default function GroupRequestModal({
           onChange={(e) => setNewBatchId(e.target.value)}
         >
           <option value="">-- Select Batch --</option>
-          {Object.keys(groupedEntries).map(batchId => (
-            <option key={batchId} value={batchId}>{batchId}</option>
+          {batchOptions.map(b => (
+            <option key={b.id} value={b.id}>
+              {b.billingBatchId || b.id} {/* show billingBatchId if available */}
+            </option>
           ))}
         </select>
 
@@ -58,7 +74,12 @@ export default function GroupRequestModal({
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
           <button onClick={() => setGroupingEntry(null)} style={{ padding: '8px 14px' }}>Cancel</button>
-          <button onClick={handleAssign} style={{ padding: '8px 14px', backgroundColor: '#0077cc', color: 'white', borderRadius: '6px' }}>Assign</button>
+          <button
+            onClick={handleAssign}
+            style={{ padding: '8px 14px', backgroundColor: '#0077cc', color: 'white', borderRadius: '6px' }}
+          >
+            Assign
+          </button>
         </div>
       </div>
     </div>

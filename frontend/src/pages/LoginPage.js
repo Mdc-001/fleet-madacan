@@ -5,7 +5,6 @@ import { signInWithEmailAndPassword } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 import { useNavigate } from 'react-router-dom';
-// Import logo (adjust path if placed differently)
 import logo from '../assets/logo.png';
 
 function LoginPage() {
@@ -22,6 +21,11 @@ function LoginPage() {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
 
+      // 🔍 Verify token claims right after login
+      const token = await user.getIdTokenResult(true); // force refresh
+      console.log("Role claim from token:", token.claims.role);
+
+      // Still fetch user doc if you want to keep consistency
       const userRef = doc(db, 'users', user.uid);
       const userSnap = await getDoc(userRef);
 
@@ -32,17 +36,15 @@ function LoginPage() {
       const userData = userSnap.data();
       const role = userData.role;
 
+      // Navigate based on role
       if (role === 'Admin') navigate('/admin');
-else if (role === 'User') navigate('/user');
-else if (role === 'Approval') navigate('/approval');
-else if (role === 'verificator') navigate('/verificator-dashboard');
-else if (role === 'storeroom') navigate('/warehouse-dashboard');
-else if (role === 'Scm') {
-  navigate('/scm'); // ✅ your dedicated dashboard
-} 
-else throw new Error('Unknown role: ' + role);
-
-
+      else if (role === 'User') navigate('/user');
+      else if (role === 'Approval') navigate('/approval');
+      else if (role === 'verificator') navigate('/verificator-dashboard');
+      else if (role === 'storeroom') navigate('/warehouse-dashboard');
+      else if (role === 'Scm') navigate('/scm');
+      else if (role === 'Guest') navigate('/guest'); // 👈 NEW Guest route
+      else throw new Error('Unknown role: ' + role);
 
     } catch (err) {
       console.error(err);

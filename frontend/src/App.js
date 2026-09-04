@@ -15,6 +15,7 @@ import WarehouseDashboard from './pages/WarehouseDashboard';
 import MaintenanceFollowUp from './pages/MaintenanceFollowUp';
 import SCMDashboard from './pages/SCMDashboard';
 import CustomerServiceTracking from './pages/CustomerServiceTracking';
+import GuestDashboard from './pages/GuestDashboard'; // 👈 NEW import
 
 function App() {
   return (
@@ -66,9 +67,18 @@ function App() {
         path="/scm"
         element={<ProtectedRoute allowedRoles={['Scm']}><SCMDashboard /></ProtectedRoute>}
       />
+    <Route
+  path="/customer-service"
+  element={
+    <ProtectedRoute allowedRoles={['admin', 'user', 'scm', 'guest', 'approval']}>
+      <CustomerServiceTracking />
+    </ProtectedRoute>
+  }
+/>
+
       <Route
-        path="/customer-service"
-        element={<ProtectedRoute allowedRoles={['Admin', 'User', 'Scm']}><CustomerServiceTracking /></ProtectedRoute>}
+        path="/guest"
+        element={<ProtectedRoute allowedRoles={['Guest']}><GuestDashboard /></ProtectedRoute>} // 👈 protect Guest route
       />
     </Routes>
   );

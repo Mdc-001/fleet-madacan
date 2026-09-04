@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Navigate } from "react-router-dom";
-import { auth, db } from "../firebase";
-import { doc, getDoc } from "firebase/firestore";
+import { auth } from "../firebase";
 
 const ProtectedRoute = ({ children, allowedRoles }) => {
   const [role, setRole] = useState(null);
@@ -13,12 +12,11 @@ const ProtectedRoute = ({ children, allowedRoles }) => {
       if (currentUser) {
         setUser(currentUser);
         try {
-          const snap = await getDoc(doc(db, "users", currentUser.uid));
-          // Normalize role to lowercase
-          const firestoreRole = snap.data()?.role?.toLowerCase();
-          setRole(firestoreRole || null);
+          const token = await currentUser.getIdTokenResult(true);
+          const claimRole = token.claims.role?.toLowerCase();
+          setRole(claimRole || null);
         } catch (err) {
-          console.error("Error fetching user role:", err);
+          console.error("Error fetching user claims:", err);
           setRole(null);
         }
       } else {
@@ -49,7 +47,6 @@ const ProtectedRoute = ({ children, allowedRoles }) => {
     return <div>Access denied</div>;
   }
 
-  // Pass normalized role down to children
   return React.cloneElement(children, { role });
 };
 

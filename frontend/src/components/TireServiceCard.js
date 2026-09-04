@@ -17,7 +17,6 @@ export default function TireServiceCard({ role }) {
   const [newBatchId, setNewBatchId] = useState('');
   const [showApproveAction, setShowApproveAction] = useState(false);
 
-  // Flash animation style
   useEffect(() => {
     const flashStyle = `
       @keyframes flash {
@@ -31,7 +30,6 @@ export default function TireServiceCard({ role }) {
     document.head.appendChild(styleTag);
   }, []);
 
-  // Toggle between badge and button for Approval role
   useEffect(() => {
     const interval = setInterval(() => {
       setShowApproveAction(prev => !prev);
@@ -41,10 +39,28 @@ export default function TireServiceCard({ role }) {
 
   const fetchEntries = async () => {
     try {
-      const snap = await getDocs(collection(db, 'customerServiceTracking'));
-      const data = snap.docs.map(d => ({ id: d.id, ...d.data() }))
-        .filter(d => d.serviceType === 'tire');
-      setEntries(data);
+      const batchSnap = await getDocs(collection(db, 'customerServiceTracking'));
+      const batches = [];
+
+      for (const batchDoc of batchSnap.docs) {
+        const batchId = batchDoc.id;
+        const batchData = batchDoc.data();
+
+        const requestsSnap = await getDocs(collection(db, `customerServiceTracking/${batchId}/requests`));
+        const requests = requestsSnap.docs.map(r => ({
+          id: r.id,
+          ...r.data()
+        }));
+
+        batches.push({
+          batchId,
+          billingBatchId: batchData.billingBatchId || batchId,
+          ...batchData,
+          requests
+        });
+      }
+
+      setEntries(batches);
     } catch (err) {
       console.error('Fetch failed:', err);
     }
@@ -52,42 +68,47 @@ export default function TireServiceCard({ role }) {
 
   useEffect(() => { fetchEntries(); }, []);
 
-  const handleUpdateStatus = async (entryId, status) => {
+  const handleUpdateStatus = async (batchId, requestId, status) => {
     if (!status) return;
     try {
-      await updateDoc(doc(db, 'customerServiceTracking', entryId), { scmApproval: status });
+      await updateDoc(doc(db, `customerServiceTracking/${batchId}/requests`, requestId), {
+        scmApproval: status
+      });
       fetchEntries();
     } catch (err) {
       console.error('Update failed:', err);
     }
   };
 
-  const handleManageAction = async (entryId, action) => {
+  const handleManageAction = async (batchId, requestId, action) => {
     try {
       if (action === 'edit') {
-        const entry = entries.find(e => e.id === entryId);
+        const batch = entries.find(b => b.batchId === batchId);
+        const entry = batch.requests.find(r => r.id === requestId);
         setEditingEntry(entry);
         setEditForm({
           plate: entry.plate || '',
           driverName: entry.driverName || '',
           serviceProvider: entry.serviceProvider || '',
-          billingBatchId: entry.billingBatchId || 'UNASSIGNED',
+          billingBatchId: batch.billingBatchId || 'UNASSIGNED',
         });
       } else if (action === 'delete') {
-        await deleteDoc(doc(db, 'customerServiceTracking', entryId));
+        await deleteDoc(doc(db, `customerServiceTracking/${batchId}/requests`, requestId));
         fetchEntries();
       } else if (action === 'group') {
-        setGroupingEntry(entryId);
+        setGroupingEntry(requestId);
       }
     } catch (err) {
       console.error('Manage action failed:', err);
     }
   };
 
-  const handleAssignToBatch = async (entryId, batchId) => {
-    if (!batchId) return;
+  const handleAssignToBatch = async (batchId, requestId, newBatchId) => {
+    if (!newBatchId) return;
     try {
-      await updateDoc(doc(db, 'customerServiceTracking', entryId), { billingBatchId: batchId });
+      await updateDoc(doc(db, `customerServiceTracking/${batchId}/requests`, requestId), {
+        billingBatchId: newBatchId
+      });
       setGroupingEntry(null);
       setNewBatchId('');
       fetchEntries();
@@ -96,14 +117,14 @@ export default function TireServiceCard({ role }) {
     }
   };
 
-  // SCM triggers final approval for a whole batch
+  // 🔧 SCM explicitly asks for final approval → sets scmFinalApproval:true
   const handleAskFinalApproval = async (batchId) => {
     try {
-      for (const entry of groupedEntries[batchId]) {
-        await updateDoc(doc(db, 'customerServiceTracking', entry.id), {
-          status: "WaitingFinalApproval"
-        });
-      }
+      await updateDoc(doc(db, "customerServiceTracking", batchId), {
+        scmFinalApproval: true,
+        finalApproval: false,
+        status: "WaitingFinalApproval"
+      });
       fetchEntries();
       alert(`Batch ${batchId} is now waiting for Final Approval.`);
     } catch (err) {
@@ -111,16 +132,13 @@ export default function TireServiceCard({ role }) {
     }
   };
 
-  // Approval role finalizes batch
   const handleFinalApproval = async (batchId, approved) => {
     try {
-      for (const entry of groupedEntries[batchId]) {
-        await updateDoc(doc(db, 'customerServiceTracking', entry.id), {
-          status: approved ? "Finished" : "Rejected",
-          finalApproval: approved,
-          closedDate: new Date()
-        });
-      }
+      await updateDoc(doc(db, "customerServiceTracking", batchId), {
+        finalApproval: approved,
+        status: approved ? "Finished" : "Rejected",
+        closedDate: new Date()
+      });
       fetchEntries();
       alert(`Batch ${batchId} has been ${approved ? "Final Approved" : "Rejected"}.`);
     } catch (err) {
@@ -128,12 +146,20 @@ export default function TireServiceCard({ role }) {
     }
   };
 
-  const groupedEntries = entries.reduce((groups, entry) => {
-    const batchId = entry.billingBatchId || 'UNASSIGNED';
-    if (!groups[batchId]) groups[batchId] = [];
-    groups[batchId].push(entry);
-    return groups;
-  }, {});
+  const handleScmApproveBatch = async (batchId) => {
+    try {
+      const requestsSnap = await getDocs(collection(db, `customerServiceTracking/${batchId}/requests`));
+      for (const req of requestsSnap.docs) {
+        await updateDoc(doc(db, `customerServiceTracking/${batchId}/requests`, req.id), {
+          scmApproval: "approved"
+        });
+      }
+      fetchEntries();
+      alert(`✅ All requests in batch ${batchId} approved by SCM.`);
+    } catch (err) {
+      console.error("SCM batch approval failed:", err);
+    }
+  };
 
   const dropdownStyle = {
     borderRadius: '8px',
@@ -148,7 +174,6 @@ export default function TireServiceCard({ role }) {
     <div style={{ backgroundColor: '#fff', padding: '24px', borderRadius: '16px', boxShadow: '0 4px 12px rgba(0,0,0,0.08)', marginBottom: '24px' }}>
       <h3 style={{ marginBottom: '20px', color: '#0077cc' }}>🛞 Tire Service Tracking</h3>
 
-      {/* Mode selector */}
       <div style={{ marginBottom: '20px' }}>
         <button onClick={() => setMode('single')} style={{ borderRadius: '20px', padding: '10px 18px', marginRight: '12px', backgroundColor: mode === 'single' ? '#0077cc' : '#e0e0e0', color: mode === 'single' ? 'white' : '#333' }}>
           ➕ Single Tire Request
@@ -161,24 +186,17 @@ export default function TireServiceCard({ role }) {
       {mode === 'single' && <TireSingleRequest onSaved={fetchEntries} role={role} />}
       {mode === 'group' && <TireGroupedRequest onSaved={fetchEntries} role={role} />}
 
-      {/* Grouped list */}
       <h4 style={{ marginTop: '30px', marginBottom: '16px', color: '#444' }}>📋 Tire Requests Grouped by Billing ID</h4>
-      {Object.keys(groupedEntries).map(batchId => {
-        const isExpanded = expandedBatch === batchId;
-        const pendingCount = groupedEntries[batchId].filter(
-          e => e.scmApproval?.toLowerCase() === 'pending'
-        ).length;
-        const allScmApproved = groupedEntries[batchId].every(
-          e => e.scmApproval?.toLowerCase() === 'approved'
-        );
-        const batchWaitingFinalApproval = groupedEntries[batchId].every(
-          e => e.status === 'WaitingFinalApproval'
-        );
+      {entries.map(batch => {
+        const isExpanded = expandedBatch === batch.batchId;
+        const pendingCount = batch.requests.filter(r => r.scmApproval?.toLowerCase() === 'pending').length;
+        const allScmApproved = batch.requests.every(r => r.scmApproval?.toLowerCase() === 'approved');
+        const batchWaitingFinalApproval = batch.status === "WaitingFinalApproval";
 
         return (
-          <div key={batchId} style={{ marginBottom: '20px' }}>
+          <div key={batch.batchId} style={{ marginBottom: '20px' }}>
             <div
-              onClick={() => setExpandedBatch(isExpanded ? null : batchId)}
+              onClick={() => setExpandedBatch(isExpanded ? null : batch.batchId)}
               style={{
                 backgroundColor: isExpanded ? '#0077cc' : '#f9fafb',
                 color: isExpanded ? 'white' : '#333',
@@ -192,11 +210,11 @@ export default function TireServiceCard({ role }) {
               }}
             >
               <span>
-                {isExpanded ? '▼' : '▶'} Billing Batch: {batchId} ({groupedEntries[batchId].length} services)
+                {isExpanded ? '▼' : '▶'} Billing Batch: {batch.billingBatchId} ({batch.requests.length} services)
               </span>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                {pendingCount > 0 && (
+                                {pendingCount > 0 && (
                   <span
                     style={{
                       backgroundColor: '#ffcccc',
@@ -211,12 +229,32 @@ export default function TireServiceCard({ role }) {
                   </span>
                 )}
 
-                {/* SCM-only Ask for Final Approval button */}
-                                {role?.toLowerCase() === "scm" && allScmApproved && !batchWaitingFinalApproval && (
+                {/* SCM bulk approve button */}
+                {role?.toLowerCase() === "scm" && pendingCount > 0 && (
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      handleAskFinalApproval(batchId);
+                      handleScmApproveBatch(batch.batchId);
+                    }}
+                    style={{
+                      background: '#0077cc',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '6px',
+                      padding: '6px 12px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    ✅ Approve All Requests
+                  </button>
+                )}
+
+                {/* SCM-only Ask for Final Approval button */}
+                {role?.toLowerCase() === "scm" && allScmApproved && !batchWaitingFinalApproval && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleAskFinalApproval(batch.batchId);
                     }}
                     style={{
                       background: '#ff9800',
@@ -231,14 +269,14 @@ export default function TireServiceCard({ role }) {
                   </button>
                 )}
 
-                {/* Once escalated, show alternating badge/button for Approval role */}
+                {/* Approval role finalization */}
                 {batchWaitingFinalApproval && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                     {showApproveAction && role?.toLowerCase() === "approval" ? (
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleFinalApproval(batchId, true);
+                          handleFinalApproval(batch.batchId, true);
                         }}
                         style={{
                           background: '#4caf50',
@@ -273,7 +311,7 @@ export default function TireServiceCard({ role }) {
             {isExpanded && (
               <div style={{ padding: '12px', marginTop: '8px', backgroundColor: '#fcfcfc', borderRadius: '8px' }}>
                 <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                  {groupedEntries[batchId].map(entry => (
+                  {batch.requests.map(entry => (
                     <li
                       key={entry.id}
                       style={{
@@ -287,7 +325,7 @@ export default function TireServiceCard({ role }) {
                       <strong>Plate:</strong> {entry.plate || 'N/A'} <br />
                       <strong>Driver:</strong> {entry.driverName || 'N/A'} <br />
                       <strong>Service Provider:</strong> {entry.serviceProvider || 'N/A'} <br />
-                      <strong>Billing Batch ID:</strong> {entry.billingBatchId || 'UNASSIGNED'} <br />
+                      <strong>Billing Batch ID:</strong> {batch.billingBatchId || 'UNASSIGNED'} <br />
                       <strong>SCM Approval:</strong>{' '}
                       <span
                         style={{
@@ -320,7 +358,6 @@ export default function TireServiceCard({ role }) {
                         {entry.status || 'N/A'}
                       </span>
 
-                      {/* Action dropdowns row */}
                       <ServiceDropdowns
                         entry={entry}
                         role={role}
@@ -328,6 +365,7 @@ export default function TireServiceCard({ role }) {
                         handleUpdateStatus={handleUpdateStatus}
                         handleManageAction={handleManageAction}
                         fetchEntries={fetchEntries}
+                        batchId={batch.batchId}
                       />
                     </li>
                   ))}
@@ -338,7 +376,6 @@ export default function TireServiceCard({ role }) {
         );
       })}
 
-      {/* Modals */}
       <EditServiceModal
         editingEntry={editingEntry}
         editForm={editForm}
@@ -349,7 +386,7 @@ export default function TireServiceCard({ role }) {
 
       <GroupRequestModal
         groupingEntry={groupingEntry}
-        groupedEntries={groupedEntries}
+        groupedEntries={entries}
         newBatchId={newBatchId}
         setNewBatchId={setNewBatchId}
         setGroupingEntry={setGroupingEntry}

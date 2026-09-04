@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { db } from '../firebase';
-import { collection, addDoc, Timestamp, updateDoc, doc, getDocs, query, where } from 'firebase/firestore';
+import { collection, addDoc, Timestamp, updateDoc, doc } from 'firebase/firestore';
 
-export default function TireGroupedRequest({ onSaved, role }) {
+export default function TireGroupedRequest({ onSaved }) {
   const [batchId, setBatchId] = useState('');
   const [form, setForm] = useState({ plate: '', driverName: '', repairDate: '', serviceProvider: '' });
   const [groupRequests, setGroupRequests] = useState([]);
@@ -23,90 +23,68 @@ export default function TireGroupedRequest({ onSaved, role }) {
   const saveGroup = async () => {
     if (!batchId) return alert('Billing Batch ID is required.');
     if (groupRequests.length === 0) return alert('No requests to save.');
-    for (const req of groupRequests) {
-      await addDoc(collection(db, 'customerServiceTracking'), {
-        ...req,
+
+    try {
+      // 1️⃣ Create batch doc
+      const batchDocRef = await addDoc(collection(db, 'customerServiceTracking'), {
         billingBatchId: batchId,
+        createdAt: Timestamp.now(),
+        batchComplete: false,
         status: 'pending',
-        scmApproval: 'pending',
         finalApproval: false,
         closedDate: null,
-        serviceType: 'tire',
-        repairDate: Timestamp.fromDate(new Date(req.repairDate)),
-        timestamp: Timestamp.now(),
       });
-    }
-    alert(`✅ Saved ${groupRequests.length} Tire requests under batch ${batchId}`);
-    setGroupRequests([]);
-    setBatchId('');
-    onSaved();
-  };
 
-  // Final Approver approves/rejects the whole batch
-  const handleFinalApproval = async (approved) => {
-    if (!batchId) return alert('Batch ID required.');
-    try {
-      const q = query(collection(db, 'customerServiceTracking'), where('billingBatchId', '==', batchId));
-      const snap = await getDocs(q);
-      for (const d of snap.docs) {
-        await updateDoc(doc(db, 'customerServiceTracking', d.id), {
-          status: approved ? 'Finished' : 'Rejected',
-          finalApproval: approved,
-          closedDate: Timestamp.now()
+      console.log("Created batch doc:", batchDocRef.id);
+
+      // 2️⃣ Add each request into sub-collection
+      for (const req of groupRequests) {
+        console.log("Saving request:", req);
+        await addDoc(collection(db, `customerServiceTracking/${batchDocRef.id}/requests`), {
+          plate: req.plate,
+          driverName: req.driverName,
+          serviceProvider: req.serviceProvider,
+          status: 'pending',
+          scmApproval: 'pending',
+          finalApproval: false,
+          closedDate: null,
+          serviceType: 'tire',
+          repairDate: Timestamp.fromDate(new Date(req.repairDate)),
+          timestamp: Timestamp.now(),
         });
       }
-      alert(`Batch ${batchId} marked as ${approved ? 'Finished' : 'Rejected'}`);
+
+      // 3️⃣ Mark batch as complete → triggers Firebase function
+      await updateDoc(doc(db, 'customerServiceTracking', batchDocRef.id), {
+        batchComplete: true,
+      });
+
+      alert(`✅ Saved ${groupRequests.length} Tire requests under batch ${batchId}`);
+      setGroupRequests([]);
+      setBatchId('');
       onSaved();
     } catch (err) {
-      console.error('Final approval failed:', err);
+      console.error('Save group failed:', err);
     }
-  };
-
-  const inputStyle = {
-    borderRadius: '8px',
-    border: '1px solid #ddd',
-    padding: '10px',
-    backgroundColor: '#f9fafb',
-    flex: '1',
-    marginBottom: '10px',
-  };
-
-  const buttonStyle = {
-    borderRadius: '20px',
-    padding: '10px 18px',
-    fontWeight: 'bold',
-    cursor: 'pointer',
-    transition: 'background-color 0.2s ease',
-    marginTop: '10px',
-    marginRight: '8px',
   };
 
   return (
-    <div style={{ boxShadow: '0 2px 6px rgba(0,0,0,0.1)', borderRadius: '12px', padding: '20px', backgroundColor: '#fff', marginBottom: '20px' }}>
-      <h4 style={{ marginBottom: '16px', color: '#0077cc' }}>📦 Grouped Tire Requests by Billing</h4>
-      <input style={inputStyle} placeholder="Billing Batch ID" value={batchId} onChange={(e) => setBatchId(e.target.value)} />
-      <input style={inputStyle} placeholder="Plate number" value={form.plate} onChange={(e) => handleChange('plate', e.target.value)} />
-      <input style={inputStyle} placeholder="Driver name" value={form.driverName} onChange={(e) => handleChange('driverName', e.target.value)} />
-      <input style={inputStyle} type="date" value={form.repairDate} onChange={(e) => handleChange('repairDate', e.target.value)} />
-      <input style={inputStyle} placeholder="Service Provider" value={form.serviceProvider} onChange={(e) => handleChange('serviceProvider', e.target.value)} />
-      <div>
-        <button onClick={addToGroup} style={{ ...buttonStyle, backgroundColor: '#2196f3', color: 'white' }}>➕ Add to Group</button>
-        <button onClick={saveGroup} style={{ ...buttonStyle, backgroundColor: '#4caf50', color: 'white' }}>💾 Save Group</button>
-      </div>
-
-      {role === 'FinalApprover' && batchId && (
-        <div style={{ marginTop: '16px' }}>
-          <button onClick={() => handleFinalApproval(true)} style={{ ...buttonStyle, backgroundColor: '#4caf50', color: 'white' }}>✅ Approve Batch</button>
-          <button onClick={() => handleFinalApproval(false)} style={{ ...buttonStyle, backgroundColor: '#f44336', color: 'white' }}>❌ Reject Batch</button>
-        </div>
-      )}
+    <div>
+      <h4>📦 Grouped Tire Requests by Billing</h4>
+      <input placeholder="Billing Batch ID" value={batchId} onChange={(e) => setBatchId(e.target.value)} />
+      <input placeholder="Plate number" value={form.plate} onChange={(e) => handleChange('plate', e.target.value)} />
+      <input placeholder="Driver name" value={form.driverName} onChange={(e) => handleChange('driverName', e.target.value)} />
+      <input type="date" value={form.repairDate} onChange={(e) => handleChange('repairDate', e.target.value)} />
+      <input placeholder="Service Provider" value={form.serviceProvider} onChange={(e) => handleChange('serviceProvider', e.target.value)} />
+      <button onClick={addToGroup}>➕ Add to Group</button>
+      <button onClick={saveGroup}>💾 Save Group</button>
 
       {groupRequests.length > 0 && (
-        <div style={{ marginTop: '16px' }}>
-          <h5 style={{ color: '#333' }}>📝 Pending Group Requests (Batch: {batchId || 'N/A'})</h5>
+        <div>
+          <h5>📝 Pending Group Requests (Batch: {batchId || 'N/A'})</h5>
           <ul>
             {groupRequests.map((req, idx) => (
-              <li key={idx} style={{ marginBottom: '6px' }}>
+              <li key={idx}>
                 Plate: {req.plate}, Driver: {req.driverName}, Date: {req.repairDate}, Provider: {req.serviceProvider}
               </li>
             ))}

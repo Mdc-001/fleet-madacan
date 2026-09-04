@@ -8,7 +8,8 @@ export default function ServiceDropdowns({
   dropdownStyle,
   handleUpdateStatus,
   handleManageAction,
-  fetchEntries
+  fetchEntries,
+  batchId // 🔧 now required
 }) {
   const userRole = role?.toLowerCase() || '';
   const isPending = entry.scmApproval?.toLowerCase() === 'pending';
@@ -16,10 +17,14 @@ export default function ServiceDropdowns({
     entry.scmApproval?.toLowerCase() === 'approved' ||
     entry.scmApproval?.toLowerCase() === 'rejected';
 
+  const isFinalized =
+    entry.status?.toLowerCase() === 'finished' ||
+    entry.status?.toLowerCase() === 'rejected';
+
   // Final Approval handler
-  const handleFinalApproval = async (entryId, approved) => {
+  const handleFinalApproval = async (requestId, approved) => {
     try {
-      await updateDoc(doc(db, 'customerServiceTracking', entryId), {
+      await updateDoc(doc(db, `customerServiceTracking/${batchId}/requests`, requestId), {
         status: approved ? 'Finished' : 'Rejected',
         finalApproval: approved,
         closedDate: Timestamp.now()
@@ -32,13 +37,13 @@ export default function ServiceDropdowns({
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '8px' }}>
-      {/* SCM/Admin Approval dropdown (locked after decision) */}
+      {/* SCM/Admin Approval dropdown */}
       {(userRole === 'admin' || userRole === 'scm') && (
         <select
           style={dropdownStyle}
           value={entry.scmApproval || ''}
-          onChange={(e) => handleUpdateStatus(entry.id, e.target.value)}
-          disabled={isApprovedOrRejected} // lock once approved/rejected
+          onChange={(e) => handleUpdateStatus(batchId, entry.id, e.target.value)}
+          disabled={isApprovedOrRejected}
         >
           <option value="">⚙ Select SCM Action</option>
           <option value="approved">✅ SCM Approve</option>
@@ -46,11 +51,11 @@ export default function ServiceDropdowns({
         </select>
       )}
 
-      {/* Final Approval dropdown (Approval role only) */}
+      {/* Final Approval dropdown */}
       {userRole === 'approval' && (
         <select
           style={dropdownStyle}
-          defaultValue=""
+          value={isFinalized ? (entry.status === 'Finished' ? 'finalApproved' : 'finalRejected') : ''}
           onChange={(e) => {
             if (e.target.value === 'finalApproved') {
               handleFinalApproval(entry.id, true);
@@ -58,6 +63,7 @@ export default function ServiceDropdowns({
               handleFinalApproval(entry.id, false);
             }
           }}
+          disabled={entry.scmApproval?.toLowerCase() !== 'approved' || isFinalized}
         >
           <option value="">⚙ Final Approval</option>
           <option value="finalApproved">✅ Final Approve</option>
@@ -70,11 +76,9 @@ export default function ServiceDropdowns({
         <select
           style={dropdownStyle}
           defaultValue=""
-          onChange={(e) => handleManageAction(entry.id, e.target.value)}
+          onChange={(e) => handleManageAction(batchId, entry.id, e.target.value)}
         >
           <option value="">⚙ Manage</option>
-
-          {/* Admin options */}
           {userRole === 'admin' && (
             <>
               <option value="edit">✏️ Edit Service</option>
@@ -82,8 +86,6 @@ export default function ServiceDropdowns({
               <option value="group">📦 Group Request</option>
             </>
           )}
-
-          {/* SCM options (only if still pending) */}
           {userRole === 'scm' && isPending && (
             <option value="group">📦 Group Request</option>
           )}
