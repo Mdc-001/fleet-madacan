@@ -4,8 +4,10 @@ import TireGroupedRequest from './TireGroupedRequest';
 import ServiceDropdowns from './ServiceDropdowns';
 import EditServiceModal from './EditServiceModal';
 import GroupRequestModal from './GroupRequestModal';
-import { db } from '../firebase';
+import { db, storage } from '../firebase';
 import { collection, getDocs, updateDoc, doc, deleteDoc } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import imageCompression from 'browser-image-compression';
 
 export default function TireServiceCard({ role }) {
   const [entries, setEntries] = useState([]);
@@ -16,6 +18,10 @@ export default function TireServiceCard({ role }) {
   const [groupingEntry, setGroupingEntry] = useState(null);
   const [newBatchId, setNewBatchId] = useState('');
   const [showApproveAction, setShowApproveAction] = useState(false);
+
+  // File states
+  const [selectedPurchaseFile, setSelectedPurchaseFile] = useState(null);
+  const [selectedProformaFile, setSelectedProformaFile] = useState(null);
 
   useEffect(() => {
     const flashStyle = `
@@ -117,7 +123,6 @@ export default function TireServiceCard({ role }) {
     }
   };
 
-  // 🔧 SCM explicitly asks for final approval → sets scmFinalApproval:true
   const handleAskFinalApproval = async (batchId) => {
     try {
       await updateDoc(doc(db, "customerServiceTracking", batchId), {
@@ -161,6 +166,20 @@ export default function TireServiceCard({ role }) {
     }
   };
 
+  async function uploadCompressedFile(file, folder, batchId, fieldName) {
+    let uploadFile = file;
+    if (file.type.startsWith("image/")) {
+      const options = { maxSizeMB: 1, maxWidthOrHeight: 1920 };
+      uploadFile = await imageCompression(file, options);
+    }
+    const storageRef = ref(storage, `${folder}/${Date.now()}_${uploadFile.name}`);
+    await uploadBytes(storageRef, uploadFile);
+    const url = await getDownloadURL(storageRef);
+    await updateDoc(doc(db, "customerServiceTracking", batchId), { [fieldName]: url });
+    alert(`✅ File uploaded successfully: ${uploadFile.name}`);
+    return url;
+  }
+
   const dropdownStyle = {
     borderRadius: '8px',
     padding: '6px 12px',
@@ -190,8 +209,9 @@ export default function TireServiceCard({ role }) {
       {entries.map(batch => {
         const isExpanded = expandedBatch === batch.batchId;
         const pendingCount = batch.requests.filter(r => r.scmApproval?.toLowerCase() === 'pending').length;
-        const allScmApproved = batch.requests.every(r => r.scmApproval?.toLowerCase() === 'approved');
+                const allScmApproved = batch.requests.every(r => r.scmApproval?.toLowerCase() === 'approved');
         const batchWaitingFinalApproval = batch.status === "WaitingFinalApproval";
+        const hasRequiredFiles = batch.purchaseFileUrl && batch.proformaFileUrl;
 
         return (
           <div key={batch.batchId} style={{ marginBottom: '20px' }}>
@@ -214,102 +234,97 @@ export default function TireServiceCard({ role }) {
               </span>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                                {pendingCount > 0 && (
-                  <span
-                    style={{
-                      backgroundColor: '#ffcccc',
-                      color: '#b71c1c',
-                      padding: '3px 50px',
-                      borderRadius: '12px',
-                      fontWeight: 'bold',
-                      animation: 'flash 1s infinite'
-                    }}
-                  >
+                {pendingCount > 0 && (
+                  <span style={{ backgroundColor: '#ffcccc', color: '#b71c1c', padding: '3px 50px', borderRadius: '12px', fontWeight: 'bold', animation: 'flash 1s infinite' }}>
                     ⏳ {pendingCount} waiting SCM approval
                   </span>
                 )}
 
-                {/* SCM bulk approve button */}
                 {role?.toLowerCase() === "scm" && pendingCount > 0 && (
                   <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleScmApproveBatch(batch.batchId);
-                    }}
-                    style={{
-                      background: '#0077cc',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '6px',
-                      padding: '6px 12px',
-                      cursor: 'pointer'
-                    }}
+                    onClick={(e) => { e.stopPropagation(); handleScmApproveBatch(batch.batchId); }}
+                    style={{ background: '#0077cc', color: 'white', border: 'none', borderRadius: '6px', padding: '6px 12px', cursor: 'pointer' }}
                   >
                     ✅ Approve All Requests
                   </button>
                 )}
 
-                {/* SCM-only Ask for Final Approval button */}
-                {role?.toLowerCase() === "scm" && allScmApproved && !batchWaitingFinalApproval && (
+                {role?.toLowerCase() === "scm" && allScmApproved && !batchWaitingFinalApproval && hasRequiredFiles && (
                   <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleAskFinalApproval(batch.batchId);
-                    }}
-                    style={{
-                      background: '#ff9800',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '6px',
-                      padding: '6px 12px',
-                      cursor: 'pointer'
-                    }}
+                    onClick={(e) => { e.stopPropagation(); handleAskFinalApproval(batch.batchId); }}
+                    style={{ background: '#ff9800', color: 'white', border: 'none', borderRadius: '6px', padding: '6px 12px', cursor: 'pointer' }}
                   >
                     Ask for Final Approval
                   </button>
-                )}
-
-                {/* Approval role finalization */}
-                {batchWaitingFinalApproval && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    {showApproveAction && role?.toLowerCase() === "approval" ? (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleFinalApproval(batch.batchId, true);
-                        }}
-                        style={{
-                          background: '#4caf50',
-                          color: 'white',
-                          border: 'none',
-                          borderRadius: '6px',
-                          padding: '6px 12px',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        ✅ Click here to Final Approve
-                      </button>
-                    ) : (
-                      <span
-                        style={{
-                          backgroundColor: '#fff3cd',
-                          color: '#856404',
-                          padding: '3px 50px',
-                          borderRadius: '12px',
-                          fontWeight: 'bold',
-                          animation: 'flash 1s infinite'
-                        }}
-                      >
-                        ⏳ Waiting Final Approval
-                      </span>
-                    )}
-                  </div>
                 )}
               </div>
             </div>
 
             {isExpanded && (
               <div style={{ padding: '12px', marginTop: '8px', backgroundColor: '#fcfcfc', borderRadius: '8px' }}>
+                
+                {/* Upload Purchase Request — only User, hide if already uploaded */}
+                {role?.toLowerCase() === "user" && !batch.purchaseFileUrl && (
+                  <div style={{ marginBottom: '12px' }}>
+                    <label>📄 Upload Purchase Request:</label>
+                    <input type="file" onChange={e => setSelectedPurchaseFile(e.target.files[0])} />
+                    <button onClick={async () => {
+                      if (!selectedPurchaseFile) return;
+                      await uploadCompressedFile(
+                        selectedPurchaseFile,
+                        "customerServiceTracking/purchase",
+                        batch.batchId,
+                        "purchaseFileUrl"
+                      );
+                      setSelectedPurchaseFile(null);
+                      fetchEntries();
+                    }}>
+                      Save Purchase Request
+                    </button>
+                  </div>
+                )}
+
+                {/* Show uploaded Purchase Request file */}
+                {batch.purchaseFileUrl && (
+                  <div style={{ marginBottom: '12px', padding: '8px', backgroundColor: '#e8f5e9', borderRadius: '6px' }}>
+                    <strong>📄 Purchase Request Uploaded:</strong><br />
+                    <a href={batch.purchaseFileUrl} target="_blank" rel="noopener noreferrer" style={{ color: '#0077cc' }}>
+                      View File
+                    </a>
+                  </div>
+                )}
+
+                {/* Upload Proforma/Invoice — only SCM, hide if already uploaded */}
+                {role?.toLowerCase() === "scm" && !batch.proformaFileUrl && (
+                  <div style={{ marginBottom: '12px' }}>
+                    <label>📑 Upload Proforma/Invoice:</label>
+                    <input type="file" onChange={e => setSelectedProformaFile(e.target.files[0])} />
+                    <button onClick={async () => {
+                      if (!selectedProformaFile) return;
+                      await uploadCompressedFile(
+                        selectedProformaFile,
+                        "customerServiceTracking/proforma",
+                        batch.batchId,
+                        "proformaFileUrl"
+                      );
+                      setSelectedProformaFile(null);
+                      fetchEntries();
+                    }}>
+                      Save Proforma/Invoice
+                    </button>
+                  </div>
+                )}
+
+                {/* Show uploaded Proforma/Invoice file */}
+                {batch.proformaFileUrl && (
+                  <div style={{ marginBottom: '12px', padding: '8px', backgroundColor: '#e3f2fd', borderRadius: '6px' }}>
+                    <strong>📑 Proforma/Invoice Uploaded:</strong><br />
+                    <a href={batch.proformaFileUrl} target="_blank" rel="noopener noreferrer" style={{ color: '#0077cc' }}>
+                      View File
+                    </a>
+                  </div>
+                )}
+
                 <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
                   {batch.requests.map(entry => (
                     <li
@@ -327,34 +342,30 @@ export default function TireServiceCard({ role }) {
                       <strong>Service Provider:</strong> {entry.serviceProvider || 'N/A'} <br />
                       <strong>Billing Batch ID:</strong> {batch.billingBatchId || 'UNASSIGNED'} <br />
                       <strong>SCM Approval:</strong>{' '}
-                      <span
-                        style={{
-                          fontWeight: '500',
-                          color:
-                            entry.scmApproval?.toLowerCase() === 'approved'
-                              ? '#4caf50'
-                              : entry.scmApproval?.toLowerCase() === 'rejected'
-                              ? '#f44336'
-                              : '#999'
-                        }}
-                      >
+                      <span style={{
+                        fontWeight: '500',
+                        color:
+                          entry.scmApproval?.toLowerCase() === 'approved'
+                            ? '#4caf50'
+                            : entry.scmApproval?.toLowerCase() === 'rejected'
+                            ? '#f44336'
+                            : '#999'
+                      }}>
                         ✔ {entry.scmApproval || 'N/A'}
                       </span>
                       <br />
                       <strong>Status:</strong>{' '}
-                      <span
-                        style={{
-                          fontWeight: '500',
-                          color:
-                            entry.status === 'Finished'
-                              ? '#4caf50'
-                              : entry.status === 'Rejected'
-                              ? '#f44336'
-                              : entry.status === 'WaitingFinalApproval'
-                              ? '#ff9800'
-                              : '#999'
-                        }}
-                      >
+                      <span style={{
+                        fontWeight: '500',
+                        color:
+                          entry.status === 'Finished'
+                            ? '#4caf50'
+                            : entry.status === 'Rejected'
+                            ? '#f44336'
+                            : entry.status === 'WaitingFinalApproval'
+                            ? '#ff9800'
+                            : '#999'
+                      }}>
                         {entry.status || 'N/A'}
                       </span>
 
