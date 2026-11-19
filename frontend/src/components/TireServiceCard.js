@@ -19,8 +19,9 @@ export default function TireServiceCard({ role }) {
   const [newBatchId, setNewBatchId] = useState('');
   const [showApproveAction, setShowApproveAction] = useState(false);
 
-  const [selectedPurchaseFile, setSelectedPurchaseFile] = useState(null);
-  const [selectedProformaFile, setSelectedProformaFile] = useState(null);
+  const [selectedPurchaseFiles, setSelectedPurchaseFiles] = useState({});
+  const [selectedProformaFiles, setSelectedProformaFiles] = useState({});
+  const [uploadingFile, setUploadingFile] = useState(null);
 
   useEffect(() => {
     const flashStyle = `
@@ -221,7 +222,7 @@ export default function TireServiceCard({ role }) {
     }
   };
 
-  async function uploadCompressedFile(file, folder, batchId, fieldName) {
+  async function uploadCompressedFile(file, folder, batchId, fieldName, nameField) {
     let uploadFile = file;
     if (file.type.startsWith("image/")) {
       const options = { maxSizeMB: 1, maxWidthOrHeight: 1920 };
@@ -230,10 +231,38 @@ export default function TireServiceCard({ role }) {
     const storageRef = ref(storage, `${folder}/${Date.now()}_${uploadFile.name}`);
     await uploadBytes(storageRef, uploadFile);
     const url = await getDownloadURL(storageRef);
-    await updateDoc(doc(db, "customerServiceTracking", batchId), { [fieldName]: url });
-    alert(`✅ File uploaded successfully: ${uploadFile.name}`);
+    await updateDoc(doc(db, "customerServiceTracking", batchId), {
+      [fieldName]: url,
+      [nameField]: file.name,
+    });
     return url;
   }
+
+  const handleBatchFileUpload = async (batchId, file, fileType) => {
+    if (!file) return alert('Choose a file first.');
+    const isPurchaseFile = fileType === 'purchase';
+    const folder = isPurchaseFile ? 'tire-purchase-requests' : 'tire-proformas';
+    const urlField = isPurchaseFile ? 'purchaseFileUrl' : 'proformaFileUrl';
+    const nameField = isPurchaseFile ? 'purchaseFileName' : 'proformaFileName';
+    const fileKey = `${batchId}:${fileType}`;
+
+    setUploadingFile(fileKey);
+    try {
+      await uploadCompressedFile(file, folder, batchId, urlField, nameField);
+      if (isPurchaseFile) {
+        setSelectedPurchaseFiles(prev => ({ ...prev, [batchId]: null }));
+      } else {
+        setSelectedProformaFiles(prev => ({ ...prev, [batchId]: null }));
+      }
+      await fetchEntries();
+      alert(`✅ ${isPurchaseFile ? 'PR' : 'Proforma'} uploaded successfully.`);
+    } catch (err) {
+      console.error(`${isPurchaseFile ? 'PR' : 'Proforma'} upload failed:`, err);
+      alert(`❌ ${isPurchaseFile ? 'PR' : 'Proforma'} upload failed. Please check your connection and access, then try again.`);
+    } finally {
+      setUploadingFile(null);
+    }
+  };
 
   const dropdownStyle = {
     borderRadius: '8px',
@@ -267,6 +296,10 @@ export default function TireServiceCard({ role }) {
   const allScmApproved = batch.requests.every(r => r.scmApproval?.toLowerCase() === 'approved');
   const batchWaitingFinalApproval = batch.status === "WaitingFinalApproval";
   const hasRequiredFiles = batch.purchaseFileUrl && batch.proformaFileUrl;
+  const normalizedRole = role?.toLowerCase();
+  const batchIsOpen = !['finished', 'completed', 'rejected'].includes(batch.status?.toLowerCase());
+  const isUploadingPr = uploadingFile === `${batch.batchId}:purchase`;
+  const isUploadingProforma = uploadingFile === `${batch.batchId}:proforma`;
 
   return (
     <div key={batch.batchId} style={{ marginBottom: '20px' }}>
@@ -359,6 +392,56 @@ export default function TireServiceCard({ role }) {
 
       {isExpanded && (
         <div style={{ padding: '12px', marginTop: '8px', backgroundColor: '#fcfcfc', borderRadius: '8px' }}>
+          <div style={{ marginBottom: '16px', padding: '12px', backgroundColor: '#fff', border: '1px solid #ddd', borderRadius: '8px' }}>
+            <strong>Batch documents</strong>
+            {batch.purchaseFileUrl && (
+              <div style={{ marginTop: '8px' }}>
+                PR: <a href={batch.purchaseFileUrl} target="_blank" rel="noopener noreferrer">{batch.purchaseFileName || 'View PR file'}</a>
+              </div>
+            )}
+            {normalizedRole === 'user' && batchIsOpen && !batch.purchaseFileUrl && (
+              <div style={{ marginTop: '10px' }}>
+                <label>Upload PR (PDF or image): </label>
+                <input
+                  type="file"
+                  accept="application/pdf,image/*"
+                  disabled={isUploadingPr}
+                  onChange={e => setSelectedPurchaseFiles(prev => ({ ...prev, [batch.batchId]: e.target.files?.[0] || null }))}
+                />
+                <button
+                  type="button"
+                  disabled={!selectedPurchaseFiles[batch.batchId] || isUploadingPr}
+                  onClick={() => handleBatchFileUpload(batch.batchId, selectedPurchaseFiles[batch.batchId], 'purchase')}
+                >
+                  {isUploadingPr ? 'Uploading PR…' : 'Upload PR'}
+                </button>
+              </div>
+            )}
+
+            {batch.proformaFileUrl && (
+              <div style={{ marginTop: '8px' }}>
+                Proforma: <a href={batch.proformaFileUrl} target="_blank" rel="noopener noreferrer">{batch.proformaFileName || 'View proforma file'}</a>
+              </div>
+            )}
+            {normalizedRole === 'scm' && batchIsOpen && (
+              <div style={{ marginTop: '10px' }}>
+                <label>Upload Proforma (PDF or image): </label>
+                <input
+                  type="file"
+                  accept="application/pdf,image/*"
+                  disabled={isUploadingProforma}
+                  onChange={e => setSelectedProformaFiles(prev => ({ ...prev, [batch.batchId]: e.target.files?.[0] || null }))}
+                />
+                <button
+                  type="button"
+                  disabled={!selectedProformaFiles[batch.batchId] || isUploadingProforma}
+                  onClick={() => handleBatchFileUpload(batch.batchId, selectedProformaFiles[batch.batchId], 'proforma')}
+                >
+                  {isUploadingProforma ? 'Uploading proforma…' : batch.proformaFileUrl ? 'Replace Proforma' : 'Upload Proforma'}
+                </button>
+              </div>
+            )}
+          </div>
           <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
             {batch.requests.map(entry => (
               <li key={entry.id} style={{
